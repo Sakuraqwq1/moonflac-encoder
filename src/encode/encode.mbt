@@ -261,6 +261,53 @@ fn build_frame(
   sample_rate : Int32,
   bits : Int32,
 ) -> Bytes {
+  let planes : Array[Array[Int64]] = []
+  for channel = 0; channel < channels; channel = channel + 1 {
+    let plane = Array::make(count, 0L)
+    for index = 0; index < count; index = index + 1 {
+      plane[index] = samples[(offset + index) * channels + channel]
+    }
+    planes.push(plane)
+  }
+  let mut final_code = channel_code
+  let mut payload = planes
+  let mut depths = Array::make(channels, bits)
+  if channels == 2 {
+    let left = planes[0]
+    let right = planes[1]
+    let side = Array::make(count, 0L)
+    let mid = Array::make(count, 0L)
+    for index = 0; index < count; index = index + 1 {
+      side[index] = left[index] - right[index]
+      mid[index] = (left[index] + right[index]) >> 1
+    }
+    let independent = cost_subframe(left, count, bits) +
+      cost_subframe(right, count, bits)
+    let left_side = cost_subframe(left, count, bits) +
+      cost_subframe(side, count, bits + 1)
+    let right_side = cost_subframe(side, count, bits + 1) +
+      cost_subframe(right, count, bits)
+    let mid_side = cost_subframe(mid, count, bits) +
+      cost_subframe(side, count, bits + 1)
+    let mut best = independent
+    if left_side < best {
+      best = left_side
+      final_code = 8
+      payload = [left, side]
+      depths = [bits, bits + 1]
+    }
+    if right_side < best {
+      best = right_side
+      final_code = 9
+      payload = [side, right]
+      depths = [bits + 1, bits]
+    }
+    if mid_side < best {
+      final_code = 10
+      payload = [mid, side]
+      depths = [bits, bits + 1]
+    }
+  }
   let (size_code, wide_size) = block_size_code(count)
   let rate_code = sample_rate_code(sample_rate)
   let depth_code = sample_size_code(bits)
@@ -270,7 +317,7 @@ fn build_frame(
   header.write_bit(0)
   header.write_bits(size_code.to_int64(), 4)
   header.write_bits(rate_code.to_int64(), 4)
-  header.write_bits(channel_code.to_int64(), 4)
+  header.write_bits(final_code.to_int64(), 4)
   header.write_bits(depth_code.to_int64(), 3)
   header.write_bit(0)
   write_utf8_number(header, number.to_int64())
@@ -288,7 +335,9 @@ fn build_frame(
   let frame = @primitives.BitWriter::new()
   frame.write_bytes(header_bytes)
   frame.write_bits(@primitives.crc8(header_bytes).to_int64(), 8)
-  write_subframes(frame, samples, channels, offset, count, bits)
+  for channel = 0; channel < channels; channel = channel + 1 {
+    write_subframe(frame, payload[channel], 1, 0, 0, count, depths[channel])
+  }
   let body = frame.finish()
   let checksum = @primitives.crc16(body)
   let out = @buffer.Buffer::Buffer(size_hint=body.length() + 2)
@@ -301,18 +350,12 @@ fn build_frame(
 }
 
 ///|
-/// Write one subframe per channel, choosing the cheapest coding for each.
-fn write_subframes(
-  frame : @primitives.BitWriter,
-  samples : Array[Int64],
-  channels : Int32,
-  offset : Int32,
-  count : Int32,
-  bits : Int32,
-) -> Unit {
-  for channel = 0; channel < channels; channel = channel + 1 {
-    write_subframe(frame, samples, channels, channel, offset, count, bits)
-  }
+/// Bit cost of writing one channel, measured by writing it into a scratch
+/// writer so the estimate can never drift from what `write_subframe` emits.
+fn cost_subframe(plane : Array[Int64], count : Int32, bits : Int32) -> Int64 {
+  let scratch = @primitives.BitWriter::new()
+  write_subframe(scratch, plane, 1, 0, 0, count, bits)
+  scratch.bit_length()
 }
 
 ///|

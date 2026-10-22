@@ -24,7 +24,7 @@ MoonBit 生态里已经有两个 FLAC **解码器**（`Xcsa-ee/moonflac`、`CXRE
 | CONSTANT / VERBATIM 子帧 | ✅ |
 | FIXED 0–4 阶预测 + Rice 残差（参数搜索） | ✅ |
 | 8 / 16 / 24 / 32 bit、1–8 声道 | ✅ |
-| 立体声去相关（left/side、right/side、mid/side） | ⬜ 计划中 |
+| 立体声去相关（left/side、right/side、mid/side，按位代价选优） | ✅ |
 | LPC 子帧（Levinson-Durbin + 系数量化） | ⬜ 计划中 |
 | Rice 分区搜索（partition order > 0） | ⬜ 计划中 |
 | 流式 / 增量编码 | ⬜ 计划中 |
@@ -76,6 +76,7 @@ moon run cmd/main -- md5 abc
 | 单声道 24-bit | 4,034 B | 12,288 B | 3.05× |
 | 立体声 16-bit | 3,683 B | 16,384 B | 4.45× |
 | 立体声 24-bit | 8,714 B | 24,576 B | 2.82× |
+| 立体声 16-bit（两声道相同） | 1,903 B | 16,384 B | 8.61× |
 
 ## 测试
 

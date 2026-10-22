@@ -21,6 +21,7 @@ pub struct BitWriter {
   mut filled : Int32
 }
 pub fn BitWriter::align(Self) -> Unit
+pub fn BitWriter::bit_length(Self) -> Int64
 pub fn BitWriter::finish(Self) -> Bytes
 pub fn BitWriter::new() -> Self
 pub fn BitWriter::write_bit(Self, Int32) -> Unit

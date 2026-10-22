@@ -100,3 +100,9 @@ pub fn BitWriter::finish(self : BitWriter) -> Bytes {
   self.align()
   self.buffer.to_bytes()
 }
+
+///|
+/// Number of bits written so far, including the partial byte in flight.
+pub fn BitWriter::bit_length(self : BitWriter) -> Int64 {
+  (self.buffer.length() * 8).to_int64() + self.filled.to_int64()
+}

@@ -308,6 +308,11 @@ fn run_generate(args : Array[String]) -> Unit {
         )
       } else if kind == 2 {
         0.0
+      } else if kind == 5 {
+        0.5 *
+        @math.sin(
+          6.283185307179586 * 440.0 * index.to_double() / rate.to_double(),
+        )
       } else if kind == 3 {
         let wrapped = index % 1000
         wrapped.to_double() / 1000.0 * 2.0 - 1.0
