@@ -3,4 +3,5 @@
 import {
   "Sakuraqwq1/moonflac-encoder/src/primitives",
   "moonbitlang/core/buffer",
+  "moonbitlang/core/math",
 }

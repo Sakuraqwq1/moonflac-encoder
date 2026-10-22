@@ -281,14 +281,10 @@ fn build_frame(
       side[index] = left[index] - right[index]
       mid[index] = (left[index] + right[index]) >> 1
     }
-    let independent = cost_subframe(left, count, bits) +
-      cost_subframe(right, count, bits)
-    let left_side = cost_subframe(left, count, bits) +
-      cost_subframe(side, count, bits + 1)
-    let right_side = cost_subframe(side, count, bits + 1) +
-      cost_subframe(right, count, bits)
-    let mid_side = cost_subframe(mid, count, bits) +
-      cost_subframe(side, count, bits + 1)
+    let independent = cost_subframe(left, bits) + cost_subframe(right, bits)
+    let left_side = cost_subframe(left, bits) + cost_subframe(side, bits + 1)
+    let right_side = cost_subframe(side, bits + 1) + cost_subframe(right, bits)
+    let mid_side = cost_subframe(mid, bits) + cost_subframe(side, bits + 1)
     let mut best = independent
     if left_side < best {
       best = left_side
@@ -336,7 +332,7 @@ fn build_frame(
   frame.write_bytes(header_bytes)
   frame.write_bits(@primitives.crc8(header_bytes).to_int64(), 8)
   for channel = 0; channel < channels; channel = channel + 1 {
-    write_subframe(frame, payload[channel], 1, 0, 0, count, depths[channel])
+    write_plane_subframe(frame, payload[channel], depths[channel])
   }
   let body = frame.finish()
   let checksum = @primitives.crc16(body)
@@ -352,9 +348,9 @@ fn build_frame(
 ///|
 /// Bit cost of writing one channel, measured by writing it into a scratch
 /// writer so the estimate can never drift from what `write_subframe` emits.
-fn cost_subframe(plane : Array[Int64], count : Int32, bits : Int32) -> Int64 {
+fn cost_subframe(plane : Array[Int64], bits : Int32) -> Int64 {
   let scratch = @primitives.BitWriter::new()
-  write_subframe(scratch, plane, 1, 0, 0, count, bits)
+  write_plane_subframe(scratch, plane, bits)
   scratch.bit_length()
 }
 
@@ -364,20 +360,17 @@ fn cost_subframe(plane : Array[Int64], count : Int32, bits : Int32) -> Int64 {
 /// The estimate is exact: each candidate is costed in bits, including the
 /// subframe header and the residual partition header, so the choice always
 /// shrinks the frame or leaves it as VERBATIM.
-fn write_subframe(
+fn write_plane_subframe(
   frame : @primitives.BitWriter,
-  samples : Array[Int64],
-  channels : Int32,
-  channel : Int32,
-  offset : Int32,
-  count : Int32,
+  plane : Array[Int64],
   bits : Int32,
 ) -> Unit {
-  let first = samples[offset * channels + channel]
+  let count = plane.length()
+  let first = plane[0]
   let mut index = 1
   let mut constant = true
   while index < count && constant {
-    if samples[(offset + index) * channels + channel] != first {
+    if plane[index] != first {
       constant = false
     }
     index = index + 1
@@ -386,31 +379,67 @@ fn write_subframe(
     write_constant(frame, first, bits)
     return
   }
+  let mut best_code = 1
   let mut best_bits = (8 + count * bits).to_int64()
-  let mut best_order = -1
-  let mut best_k = 0
+  let mut best_parameter = 0
+  let mut best_shift = 0
   for order = 0; order <= 4; order = order + 1 {
     if order < count {
-      let residual = fixed_residual(
-        samples, channels, channel, offset, count, order,
-      )
+      let residual = fixed_residual(plane, order)
       let parameter = best_rice_parameter(residual)
       let cost = (8 + order * bits + 6 + 4).to_int64() +
         rice_bits(residual, parameter)
       if cost < best_bits {
         best_bits = cost
-        best_order = order
-        best_k = parameter
+        best_code = 8 + order
+        best_parameter = parameter
       }
     }
   }
-  if best_order >= 0 {
-    write_fixed(
-      frame, samples, channels, channel, offset, count, bits, best_order, best_k,
-    )
-  } else {
-    write_verbatim(frame, samples, channels, channel, offset, count, bits)
+  let choice = Array::make(4, 0L)
+  let coefficients = Array::make(33, 0L)
+  let lpc_bits = lpc_search(plane, bits, choice, coefficients)
+  if lpc_bits >= 0L && lpc_bits < best_bits {
+    best_bits = lpc_bits
+    best_code = choice[0].to_int()
+    best_shift = choice[2].to_int()
+    best_parameter = choice[3].to_int()
   }
+  frame.write_bit(0)
+  frame.write_bits(best_code.to_int64(), 6)
+  frame.write_bit(0)
+  if best_code == 1 {
+    for value in plane {
+      frame.write_signed(value, bits)
+    }
+    return
+  }
+  if best_code < 32 {
+    let order = best_code - 8
+    for index = 0; index < order; index = index + 1 {
+      frame.write_signed(plane[index], bits)
+    }
+    let residual = fixed_residual(plane, order)
+    frame.write_bits(0L, 2)
+    frame.write_bits(0L, 4)
+    frame.write_bits(best_parameter.to_int64(), 4)
+    write_rice(frame, residual, best_parameter)
+    return
+  }
+  let order = best_code - 32 + 1
+  for index = 0; index < order; index = index + 1 {
+    frame.write_signed(plane[index], bits)
+  }
+  frame.write_bits(14L, 4)
+  frame.write_signed(best_shift.to_int64(), 5)
+  for index = 1; index <= order; index = index + 1 {
+    frame.write_signed(coefficients[index], 15)
+  }
+  let residual = lpc_residual(plane, order, coefficients, best_shift)
+  frame.write_bits(0L, 2)
+  frame.write_bits(0L, 4)
+  frame.write_bits(best_parameter.to_int64(), 4)
+  write_rice(frame, residual, best_parameter)
 }
 
 ///|
@@ -427,94 +456,213 @@ fn write_constant(
 }
 
 ///|
-/// VERBATIM subframe: every sample stored at its full width.
-fn write_verbatim(
+/// Rice code one partition of a residual.
+fn write_rice(
   frame : @primitives.BitWriter,
-  samples : Array[Int64],
-  channels : Int32,
-  channel : Int32,
-  offset : Int32,
-  count : Int32,
-  bits : Int32,
+  residual : Array[Int64],
+  k : Int32,
 ) -> Unit {
-  frame.write_bit(0)
-  frame.write_bits(1L, 6)
-  frame.write_bit(0)
-  for index = 0; index < count; index = index + 1 {
-    frame.write_signed(samples[(offset + index) * channels + channel], bits)
-  }
-}
-
-///|
-/// FIXED subframe: `order` warmup samples, then Rice coded residuals.
-fn write_fixed(
-  frame : @primitives.BitWriter,
-  samples : Array[Int64],
-  channels : Int32,
-  channel : Int32,
-  offset : Int32,
-  count : Int32,
-  bits : Int32,
-  order : Int32,
-  parameter : Int32,
-) -> Unit {
-  frame.write_bit(0)
-  frame.write_bits((8 + order).to_int64(), 6)
-  frame.write_bit(0)
-  for index = 0; index < order; index = index + 1 {
-    frame.write_signed(samples[(offset + index) * channels + channel], bits)
-  }
-  let residual = fixed_residual(
-    samples, channels, channel, offset, count, order,
-  )
-  frame.write_bits(0L, 2)
-  frame.write_bits(0L, 4)
-  frame.write_bits(parameter.to_int64(), 4)
+  let mask = (1L << k) - 1L
   for value in residual {
     let folded = zigzag(value)
-    frame.write_unary((folded >> parameter).to_int())
-    frame.write_bits(folded & ((1L << parameter) - 1L), parameter)
+    frame.write_unary((folded >> k).to_int())
+    frame.write_bits(folded & mask, k)
   }
 }
 
 ///|
 /// Residual of the `order`-th fixed predictor (FLAC coefficients 1, 2 1, 3 3 1,
 /// 4 6 4 1).
-fn fixed_residual(
-  samples : Array[Int64],
-  channels : Int32,
-  channel : Int32,
-  offset : Int32,
-  count : Int32,
-  order : Int32,
-) -> Array[Int64] {
-  let length = count - order
+fn fixed_residual(plane : Array[Int64], order : Int32) -> Array[Int64] {
+  let length = plane.length() - order
   let residual = Array::make(length, 0L)
   for index = 0; index < length; index = index + 1 {
-    let position = offset + order + index
-    let current = samples[position * channels + channel]
+    let position = order + index
+    let current = plane[position]
     let mut prediction = 0L
-    if order >= 1 {
-      prediction = prediction + samples[(position - 1) * channels + channel]
-    }
-    if order >= 2 {
-      prediction = 2L * prediction -
-        samples[(position - 2) * channels + channel]
-    }
-    if order >= 3 {
-      prediction = 3L * samples[(position - 1) * channels + channel] -
-        3L * samples[(position - 2) * channels + channel] +
-        samples[(position - 3) * channels + channel]
-    }
-    if order >= 4 {
-      prediction = 4L * samples[(position - 1) * channels + channel] -
-        6L * samples[(position - 2) * channels + channel] +
-        4L * samples[(position - 3) * channels + channel] -
-        samples[(position - 4) * channels + channel]
+    if order == 1 {
+      prediction = plane[position - 1]
+    } else if order == 2 {
+      prediction = 2L * plane[position - 1] - plane[position - 2]
+    } else if order == 3 {
+      prediction = 3L * plane[position - 1] -
+        3L * plane[position - 2] +
+        plane[position - 3]
+    } else if order == 4 {
+      prediction = 4L * plane[position - 1] -
+        6L * plane[position - 2] +
+        4L * plane[position - 3] -
+        plane[position - 4]
     }
     residual[index] = current - prediction
   }
   residual
+}
+
+///|
+/// Residual of an LPC predictor: `x[n] - ((sum q[k] x[n-k]) >> shift)`.
+fn lpc_residual(
+  plane : Array[Int64],
+  order : Int32,
+  coefficients : Array[Int64],
+  shift : Int32,
+) -> Array[Int64] {
+  let length = plane.length() - order
+  let residual = Array::make(length, 0L)
+  for index = 0; index < length; index = index + 1 {
+    let position = order + index
+    let mut sum = 0L
+    for tap = 1; tap <= order; tap = tap + 1 {
+      sum = sum + coefficients[tap] * plane[position - tap]
+    }
+    residual[index] = plane[position] - (sum >> shift)
+  }
+  residual
+}
+
+///|
+/// Quantise one order's prediction coefficients into `out`, returning the right
+/// shift the decoder has to apply.
+fn quantise_into(
+  row : Array[Double],
+  precision : Int32,
+  out : Array[Int64],
+) -> Int32 {
+  let order = row.length() - 1
+  let ceiling = (1 << (precision - 1)).to_double()
+  let mut max_abs = 0.0
+  for index = 1; index <= order; index = index + 1 {
+    let magnitude = if row[index] < 0.0 { -row[index] } else { row[index] }
+    if magnitude > max_abs {
+      max_abs = magnitude
+    }
+  }
+  let mut shift = 0
+  if max_abs > 0.0 {
+    let mut scaled = max_abs
+    while scaled * 2.0 < ceiling && shift < 15 {
+      scaled = scaled * 2.0
+      shift = shift + 1
+    }
+  }
+  let scale = (1 << shift).to_double()
+  let high = (1L << (precision - 1)) - 1L
+  let low = -(1L << (precision - 1))
+  for index = 1; index <= order; index = index + 1 {
+    let value = row[index] * scale
+    let rounded = if value >= 0.0 {
+      (value + 0.5).to_int().to_int64()
+    } else {
+      (value - 0.5).to_int().to_int64()
+    }
+    if rounded > high {
+      out[index] = high
+    } else if rounded < low {
+      out[index] = low
+    } else {
+      out[index] = rounded
+    }
+  }
+  shift
+}
+
+///|
+/// Search the LPC orders and keep the cheapest one.
+///
+/// `choice` receives `[code, order, shift, rice parameter]` and `coefficients`
+/// receives the quantised taps. Returns the bit cost, or -1 when LPC is not
+/// applicable (a block too short to fit a warmup).
+fn lpc_search(
+  plane : Array[Int64],
+  bits : Int32,
+  choice : Array[Int64],
+  coefficients : Array[Int64],
+) -> Int64 {
+  let count = plane.length()
+  let mut max_order = count - 1
+  if max_order > 12 {
+    max_order = 12
+  }
+  if max_order < 1 {
+    return -1L
+  }
+  let mut mean = 0.0
+  for value in plane {
+    mean = mean + value.to_double()
+  }
+  mean = mean / count.to_double()
+  let ac = Array::make(max_order + 1, 0.0)
+  for lag = 0; lag <= max_order; lag = lag + 1 {
+    let mut sum = 0.0
+    for index = lag; index < count; index = index + 1 {
+      sum = sum +
+        (plane[index].to_double() - mean) *
+        (plane[index - lag].to_double() - mean)
+    }
+    ac[lag] = sum
+  }
+  let rows = Array::make(max_order + 1, Array::make(1, 0.0))
+  let errors = Array::make(max_order + 1, 0.0)
+  let a = Array::make(max_order + 1, 0.0)
+  let b = Array::make(max_order + 1, 0.0)
+  let mut energy = ac[0]
+  errors[0] = energy
+  for order = 1; order <= max_order; order = order + 1 {
+    let mut acc = ac[order]
+    for tap = 1; tap < order; tap = tap + 1 {
+      acc = acc + a[tap] * ac[order - tap]
+    }
+    let reflection = if energy > 0.0 { -acc / energy } else { 0.0 }
+    for tap = 1; tap < order; tap = tap + 1 {
+      b[tap] = a[tap] + reflection * a[order - tap]
+    }
+    b[order] = reflection
+    for tap = 1; tap <= order; tap = tap + 1 {
+      a[tap] = b[tap]
+    }
+    energy = energy * (1.0 - reflection * reflection)
+    let row = Array::make(order + 1, 0.0)
+    for tap = 1; tap <= order; tap = tap + 1 {
+      row[tap] = -a[tap]
+    }
+    rows[order] = row
+    errors[order] = energy
+  }
+  let mut candidate = 1
+  let mut best_estimate = -1.0
+  for order = 1; order <= max_order; order = order + 1 {
+    if errors[order] > 0.0 {
+      let estimate = count.to_double() * @math.log2(errors[order]) +
+        (order * (bits + 15) + 9).to_double()
+      if best_estimate < 0.0 || estimate < best_estimate {
+        best_estimate = estimate
+        candidate = order
+      }
+    }
+  }
+  let mut best_bits = -1L
+  let scratch = Array::make(33, 0L)
+  for delta = -1; delta <= 1; delta = delta + 1 {
+    let order = candidate + delta
+    if order >= 1 && order <= max_order {
+      let shift = quantise_into(rows[order], 15, scratch)
+      let residual = lpc_residual(plane, order, scratch, shift)
+      let parameter = best_rice_parameter(residual)
+      let cost = (8 + order * bits + 4 + 5 + order * 15).to_int64() +
+        rice_bits(residual, parameter)
+      if best_bits < 0L || cost < best_bits {
+        best_bits = cost
+        choice[0] = (32 + order - 1).to_int64()
+        choice[1] = order.to_int64()
+        choice[2] = shift.to_int64()
+        choice[3] = parameter.to_int64()
+        for tap = 1; tap <= order; tap = tap + 1 {
+          coefficients[tap] = scratch[tap]
+        }
+      }
+    }
+  }
+  best_bits
 }
 
 ///|
@@ -559,10 +707,11 @@ fn best_rice_parameter(residual : Array[Int64]) -> Int32 {
     probe = probe >> 1
     estimate = estimate + 1
   }
-  let mut best_k = 0
-  let mut best_bits = rice_bits(residual, 0)
+  let base = if estimate > 14 { 14 } else { estimate }
+  let mut best_k = 14
+  let mut best_bits = rice_bits(residual, 14)
   for delta = -1; delta <= 1; delta = delta + 1 {
-    let candidate = estimate + delta
+    let candidate = base + delta
     if candidate >= 0 && candidate <= 14 {
       let cost = rice_bits(residual, candidate)
       if cost < best_bits {
