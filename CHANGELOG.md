@@ -4,6 +4,16 @@ All notable changes to `moonflac-encoder` are documented here. The format follow
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-10-22
+
+### Fixed
+
+- The status banner in the README still said LPC and the partition search were
+  unimplemented, which contradicted the capability table and the changelog.
+  It now states what 0.2.0 actually ships, and a roadmap section lists the
+  remaining gaps (streaming, compression parity with libFLAC, adaptive block
+  sizes, reference verification for the remaining bit depths).
+
 ## [0.2.0] - 2026-10-22
 
 ### Added

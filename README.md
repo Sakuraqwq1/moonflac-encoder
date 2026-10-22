@@ -4,7 +4,7 @@
 
 纯 MoonBit 实现的 **FLAC 编码器**：把 PCM 采样写成原生 `.flac` 文件。
 
-> 状态：**开发中**。当前已实现 STREAMINFO + MD5、帧头 + CRC-8/CRC-16、CONSTANT / VERBATIM / FIXED(0–4) 子帧、Rice 残差；LPC 与分区搜索尚未实现，见「路线图」。
+> 状态：**0.2.0，核心功能可用**。STREAMINFO + MD5、定长块帧与 CRC-8/CRC-16、CONSTANT / VERBATIM / FIXED(0–4) / LPC(1–12) 子帧、Rice 分区搜索、立体声去相关均已实现，并通过 libsndfile 与 `Xcsa-ee/moonflac` 两个独立解码器验证。流式编码与压缩率对齐见「路线图」。
 
 ## 为什么需要它
 
@@ -25,7 +25,7 @@ MoonBit 生态里已经有两个 FLAC **解码器**（`Xcsa-ee/moonflac`、`CXRE
 | 帧头 CRC-8、帧尾 CRC-16 | ✅ |
 | CONSTANT / VERBATIM 子帧 | ✅ |
 | FIXED 0–4 阶预测 + Rice 残差（参数搜索） | ✅ |
-| 8 / 16 / 24 bit、1–8 声道（32 bit 已实现，参考解码器不支持故未验证） | ✅ |
+| 位深 4–32 bit 路径、1–8 声道（8/16/24 经参考解码器验证；32 bit libsndfile 不支持） | ✅ |
 | 立体声去相关（left/side、right/side、mid/side，按位代价选优） | ✅ |
 | LPC 子帧（Levinson-Durbin + 15-bit 系数量化 + 移位选择） | ✅ |
 | Rice 分区搜索（partition order 1–8） | ✅ |
@@ -105,6 +105,13 @@ MD5 校验，因此这等于一个独立的 MoonBit 实现认可了本编码器�
 - **阶数用残差能量估计**：先算 1..12 阶的自相关与 Levinson-Durbin 递推，用各阶残差能量估出最省的阶，只对该阶及其前后各一阶做精确代价计算，避免逐阶全算。
 - **代价用 Int64 累加**：32 位精度会让 24-bit 噪声的位数估算溢出，从而误选编码器写不下的参数——这一点在开发中被矩阵测试抓出过。
 - **MD5 自实现**：核心库没有 MD5，而 STREAMINFO 的校验依赖它；实现后用 RFC 1321 标准向量验证。
+
+## 路线图
+
+- [ ] 流式 / 增量编码（当前 API 需要整块 PCM 驻留内存）
+- [ ] 压缩率对齐 libFLAC：同一段 PCM 上，当前输出比 libFLAC 默认设置大 14%–96%（噪声信号基本持平），差距集中在 LPC 系数量化与分区代价模型
+- [ ] 自适应块长
+- [ ] 12 / 20 / 32 bit 的参考解码器验证（当前矩阵覆盖 8 / 16 / 24）
 
 ## 许可证与参考
 
