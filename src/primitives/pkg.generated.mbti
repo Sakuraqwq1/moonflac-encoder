@@ -1,0 +1,34 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "Sakuraqwq1/moonflac-encoder/src/primitives"
+
+import {
+  "moonbitlang/core/buffer",
+}
+
+// Values
+pub fn crc16(Bytes) -> Int32
+
+pub fn crc8(Bytes) -> Int32
+
+pub fn md5(Bytes) -> Bytes
+
+// Errors
+
+// Types and methods
+pub struct BitWriter {
+  buffer : @buffer.Buffer
+  mut current : Int32
+  mut filled : Int32
+}
+pub fn BitWriter::align(Self) -> Unit
+pub fn BitWriter::finish(Self) -> Bytes
+pub fn BitWriter::new() -> Self
+pub fn BitWriter::write_bit(Self, Int32) -> Unit
+pub fn BitWriter::write_bits(Self, Int64, Int32) -> Unit
+pub fn BitWriter::write_bytes(Self, Bytes) -> Unit
+pub fn BitWriter::write_signed(Self, Int64, Int32) -> Unit
+pub fn BitWriter::write_unary(Self, Int32) -> Unit
+
+// Type aliases
+
+// Traits

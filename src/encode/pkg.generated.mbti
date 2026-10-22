@@ -1,0 +1,20 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "Sakuraqwq1/moonflac-encoder/src/encode"
+
+// Values
+pub fn encode(Array[Int64], Int32, Int32, Int32) -> Bytes raise EncodeError
+
+// Errors
+pub suberror EncodeError {
+  Empty
+  BadChannels(Int32)
+  BadBits(Int32)
+  BadSampleRate(Int32)
+  NotWholeFrames(Int32, Int32)
+}
+
+// Types and methods
+
+// Type aliases
+
+// Traits

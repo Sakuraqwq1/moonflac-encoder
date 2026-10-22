@@ -1,0 +1,6 @@
+// moonflac-encoder — pure MoonBit FLAC encoder.
+
+import {
+  "Sakuraqwq1/moonflac-encoder/src/primitives",
+  "moonbitlang/core/buffer",
+}
