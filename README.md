@@ -25,7 +25,7 @@ MoonBit 生态里已经有两个 FLAC **解码器**（`Xcsa-ee/moonflac`、`CXRE
 | 帧头 CRC-8、帧尾 CRC-16 | ✅ |
 | CONSTANT / VERBATIM 子帧 | ✅ |
 | FIXED 0–4 阶预测 + Rice 残差（参数搜索） | ✅ |
-| 8 / 16 / 24 / 32 bit、1–8 声道 | ✅ |
+| 8 / 16 / 24 bit、1–8 声道（32 bit 已实现，参考解码器不支持故未验证） | ✅ |
 | 立体声去相关（left/side、right/side、mid/side，按位代价选优） | ✅ |
 | LPC 子帧（Levinson-Durbin + 15-bit 系数量化 + 移位选择） | ✅ |
 | Rice 分区搜索（partition order 1–8） | ✅ |
