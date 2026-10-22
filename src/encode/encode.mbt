@@ -381,7 +381,6 @@ fn write_plane_subframe(
   }
   let mut best_code = 1
   let mut best_bits = (8 + count * bits).to_int64()
-  let mut best_parameter = 0
   let mut best_shift = 0
   for order = 0; order <= 4; order = order + 1 {
     if order < count {
@@ -392,7 +391,6 @@ fn write_plane_subframe(
       if cost < best_bits {
         best_bits = cost
         best_code = 8 + order
-        best_parameter = parameter
       }
     }
   }
@@ -403,7 +401,6 @@ fn write_plane_subframe(
     best_bits = lpc_bits
     best_code = choice[0].to_int()
     best_shift = choice[2].to_int()
-    best_parameter = choice[3].to_int()
   }
   frame.write_bit(0)
   frame.write_bits(best_code.to_int64(), 6)
@@ -420,10 +417,10 @@ fn write_plane_subframe(
       frame.write_signed(plane[index], bits)
     }
     let residual = fixed_residual(plane, order)
+    let partition = best_partition(residual, count, order)
     frame.write_bits(0L, 2)
-    frame.write_bits(0L, 4)
-    frame.write_bits(best_parameter.to_int64(), 4)
-    write_rice(frame, residual, best_parameter)
+    frame.write_bits(partition.to_int64(), 4)
+    write_partitions(frame, residual, count, order, partition)
     return
   }
   let order = best_code - 32 + 1
@@ -436,10 +433,10 @@ fn write_plane_subframe(
     frame.write_signed(coefficients[index], 15)
   }
   let residual = lpc_residual(plane, order, coefficients, best_shift)
+  let partition = best_partition(residual, count, order)
   frame.write_bits(0L, 2)
-  frame.write_bits(0L, 4)
-  frame.write_bits(best_parameter.to_int64(), 4)
-  write_rice(frame, residual, best_parameter)
+  frame.write_bits(partition.to_int64(), 4)
+  write_partitions(frame, residual, count, order, partition)
 }
 
 ///|
@@ -453,21 +450,6 @@ fn write_constant(
   frame.write_bits(0L, 6)
   frame.write_bit(0)
   frame.write_signed(value, bits)
-}
-
-///|
-/// Rice code one partition of a residual.
-fn write_rice(
-  frame : @primitives.BitWriter,
-  residual : Array[Int64],
-  k : Int32,
-) -> Unit {
-  let mask = (1L << k) - 1L
-  for value in residual {
-    let folded = zigzag(value)
-    frame.write_unary((folded >> k).to_int())
-    frame.write_bits(folded & mask, k)
-  }
 }
 
 ///|
@@ -666,6 +648,99 @@ fn lpc_search(
 }
 
 ///|
+/// Whether partition order `p` is legal for this block.
+fn partition_valid(block_size : Int32, order : Int32, p : Int32) -> Bool {
+  let parts = 1 << p
+  block_size % parts == 0 && block_size >> p > order
+}
+
+///|
+/// Rice cost of the whole residual split into `2^p` partitions, each with its
+/// own parameter.
+fn partition_cost(
+  residual : Array[Int64],
+  block_size : Int32,
+  order : Int32,
+  p : Int32,
+) -> Int64 {
+  let parts = 1 << p
+  let size = block_size >> p
+  let mut offset = 0
+  let mut total = 0L
+  for index = 0; index < parts; index = index + 1 {
+    let length = if index == 0 { size - order } else { size }
+    if length > 0 {
+      let k = best_parameter_range(residual, offset, length)
+      total = total + 4L + rice_bits_range(residual, offset, length, k)
+      offset = offset + length
+    }
+  }
+  total
+}
+
+///|
+/// Pick the partition order that codes the residual in the fewest bits.
+fn best_partition(
+  residual : Array[Int64],
+  block_size : Int32,
+  order : Int32,
+) -> Int32 {
+  let mut best = 0
+  let mut best_cost = partition_cost(residual, block_size, order, 0)
+  for p = 1; p <= 8; p = p + 1 {
+    if partition_valid(block_size, order, p) {
+      let cost = partition_cost(residual, block_size, order, p)
+      if cost < best_cost {
+        best_cost = cost
+        best = p
+      }
+    }
+  }
+  best
+}
+
+///|
+/// Rice code one partition.
+fn write_rice_range(
+  frame : @primitives.BitWriter,
+  residual : Array[Int64],
+  start : Int32,
+  length : Int32,
+  k : Int32,
+) -> Unit {
+  let mask = (1L << k) - 1L
+  let end = start + length
+  for index = start; index < end; index = index + 1 {
+    let folded = zigzag(residual[index])
+    frame.write_unary((folded >> k).to_int())
+    frame.write_bits(folded & mask, k)
+  }
+}
+
+///|
+/// Write the partition table and the coded residual.
+fn write_partitions(
+  frame : @primitives.BitWriter,
+  residual : Array[Int64],
+  block_size : Int32,
+  order : Int32,
+  p : Int32,
+) -> Unit {
+  let parts = 1 << p
+  let size = block_size >> p
+  let mut offset = 0
+  for index = 0; index < parts; index = index + 1 {
+    let length = if index == 0 { size - order } else { size }
+    if length > 0 {
+      let k = best_parameter_range(residual, offset, length)
+      frame.write_bits(k.to_int64(), 4)
+      write_rice_range(frame, residual, offset, length, k)
+      offset = offset + length
+    }
+  }
+}
+
+///|
 /// Fold a signed residual into an unsigned one (FLAC's zig-zag rule).
 fn zigzag(value : Int64) -> Int64 {
   if value >= 0L {
@@ -676,14 +751,26 @@ fn zigzag(value : Int64) -> Int64 {
 }
 
 ///|
-/// Exact cost of Rice coding `residual` with parameter `k`.
-fn rice_bits(residual : Array[Int64], k : Int32) -> Int64 {
+/// Exact cost of Rice coding `length` values of `residual` starting at `start`.
+fn rice_bits_range(
+  residual : Array[Int64],
+  start : Int32,
+  length : Int32,
+  k : Int32,
+) -> Int64 {
   let mut total = 0L
-  for value in residual {
-    let folded = zigzag(value)
+  let end = start + length
+  for index = start; index < end; index = index + 1 {
+    let folded = zigzag(residual[index])
     total = total + ((folded >> k) + 1L + k.to_int64())
   }
   total
+}
+
+///|
+/// Exact cost of Rice coding the whole residual.
+fn rice_bits(residual : Array[Int64], k : Int32) -> Int64 {
+  rice_bits_range(residual, 0, residual.length(), k)
 }
 
 ///|
@@ -692,13 +779,23 @@ fn rice_bits(residual : Array[Int64], k : Int32) -> Int64 {
 /// The mean folded value gives a close estimate, so only three candidates are
 /// costed instead of the full 0..14 range.
 fn best_rice_parameter(residual : Array[Int64]) -> Int32 {
-  let length = residual.length()
-  if length == 0 {
+  best_parameter_range(residual, 0, residual.length())
+}
+
+///|
+/// Pick the Rice parameter for one partition.
+fn best_parameter_range(
+  residual : Array[Int64],
+  start : Int32,
+  length : Int32,
+) -> Int32 {
+  if length <= 0 {
     return 0
   }
   let mut sum = 0L
-  for value in residual {
-    sum = sum + zigzag(value)
+  let end = start + length
+  for index = start; index < end; index = index + 1 {
+    sum = sum + zigzag(residual[index])
   }
   let mean = sum / length.to_int64()
   let mut estimate = 0
@@ -709,11 +806,11 @@ fn best_rice_parameter(residual : Array[Int64]) -> Int32 {
   }
   let base = if estimate > 14 { 14 } else { estimate }
   let mut best_k = 14
-  let mut best_bits = rice_bits(residual, 14)
+  let mut best_bits = rice_bits_range(residual, start, length, 14)
   for delta = -1; delta <= 1; delta = delta + 1 {
     let candidate = base + delta
     if candidate >= 0 && candidate <= 14 {
-      let cost = rice_bits(residual, candidate)
+      let cost = rice_bits_range(residual, start, length, candidate)
       if cost < best_bits {
         best_bits = cost
         best_k = candidate
