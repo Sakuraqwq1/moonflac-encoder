@@ -90,6 +90,13 @@ moon fmt --check
 
 单元测试覆盖 MD5 标准向量、CRC-8/CRC-16 标准向量、STREAMINFO 字段、子帧选择、错误路径。
 
+### 与生态内解码器的互操作
+
+除了 libsndfile，本编码器产出的文件也交给生态里已有的纯 MoonBit FLAC 解码器
+`Xcsa-ee/moonflac` 解码（单声道/立体声、8/16/24-bit、噪声与块边界共 6 组配置）：
+全部解码成功，且它重算的 PCM 摘要与文件 STREAMINFO 中记录的一致。该解码器自带
+MD5 校验，因此这等于一个独立的 MoonBit 实现认可了本编码器的输出。
+
 ## 实现要点
 
 - **位流优先**：FLAC 帧是连续的位流，所有字段经由一个 MSB-first 的 `BitWriter` 写出，避免手工对齐出错。
