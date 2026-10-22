@@ -1,5 +1,7 @@
 # moonflac-encoder
 
+[![CI](https://github.com/Sakuraqwq1/moonflac-encoder/actions/workflows/ci.yml/badge.svg)](https://github.com/Sakuraqwq1/moonflac-encoder/actions/workflows/ci.yml)
+
 纯 MoonBit 实现的 **FLAC 编码器**：把 PCM 采样写成原生 `.flac` 文件。
 
 > 状态：**开发中**。当前已实现 STREAMINFO + MD5、帧头 + CRC-8/CRC-16、CONSTANT / VERBATIM / FIXED(0–4) 子帧、Rice 残差；LPC 与分区搜索尚未实现，见「路线图」。
@@ -26,7 +28,7 @@ MoonBit 生态里已经有两个 FLAC **解码器**（`Xcsa-ee/moonflac`、`CXRE
 | 8 / 16 / 24 / 32 bit、1–8 声道 | ✅ |
 | 立体声去相关（left/side、right/side、mid/side，按位代价选优） | ✅ |
 | LPC 子帧（Levinson-Durbin + 15-bit 系数量化 + 移位选择） | ✅ |
-| Rice 分区搜索（partition order > 0） | ⬜ 计划中 |
+| Rice 分区搜索（partition order 1–8） | ✅ |
 | 流式 / 增量编码 | ⬜ 计划中 |
 
 ## 用法（库）
@@ -72,11 +74,11 @@ moon run cmd/main -- md5 abc
 
 | 配置 | FLAC | 原始 PCM | 压缩比 |
 | --- | --- | --- | --- |
-| 单声道 16-bit | 1,899 B | 8,192 B | 4.31× |
+| 单声道 16-bit | 1,896 B | 8,192 B | 4.31× |
 | 单声道 24-bit | 4,034 B | 12,288 B | 3.05× |
-| 立体声 16-bit | 3,683 B | 16,384 B | 4.45× |
+| 立体声 16-bit | 3,680 B | 16,384 B | 4.45× |
 | 立体声 24-bit | 8,714 B | 24,576 B | 2.82× |
-| 立体声 16-bit（两声道相同） | 1,903 B | 16,384 B | 8.61× |
+| 立体声 16-bit（两声道相同） | 1,899 B | 16,384 B | 8.61× |
 
 ## 测试
 

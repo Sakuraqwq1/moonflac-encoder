@@ -1,0 +1,42 @@
+# Changelog
+
+All notable changes to `moonflac-encoder` are documented here. The format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
+[Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [0.2.0] - 2026-10-22
+
+### Added
+
+- **Rice partition search**: partition orders 1–8 are costed per subframe and the
+  cheapest is used. The first partition accounts for the warmup samples, as
+  RFC 9639 requires. Two tone test blocks shrink by another 1.3% and the cross
+  decoder matrix still decodes bit-exactly.
+
+### Changed
+
+- README now carries the CI badge and the measured sizes of the current build.
+
+## [0.1.0] - 2026-10-22
+
+### Added
+
+- **STREAMINFO** with the MD5 signature of the unencoded PCM (RFC 9639 §8.4),
+  computed by a from-scratch MD5 implementation.
+- **Frames**: fixed blocksize framing, CRC-8 over the frame header, CRC-16 over
+  the whole frame, UTF-8 style frame numbers.
+- **Subframes**: CONSTANT, VERBATIM, FIXED order 0–4 and LPC order 1–12.
+- **LPC**: Levinson-Durbin on the centred autocorrelation, order chosen from the
+  residual energy of each recursion step, coefficients quantised to 15 bits with
+  a shift chosen to use the available precision.
+- **Stereo decorrelation**: left/right, left/side, right/side and mid/side are all
+  costed per frame and the cheapest is used.
+- **Rice coding**: per partition parameter search including the escape-free
+  4-bit parameter form.
+- **CLI**: `selftest`, `gen`, `encode`, `md5` and `version` commands over base64
+  payloads, so the encoder can be exercised without a file system binding.
+- **Tests**: MD5 and CRC reference vectors, STREAMINFO field round trips,
+  subframe selection, error paths.
+- **Verification**: every build is cross checked against `libsndfile` through
+  Python `soundfile` — the decoded samples re-hash to the STREAMINFO digest
+  across 16/24 bit, mono/stereo and block boundary cases.
