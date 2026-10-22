@@ -82,6 +82,14 @@ moon run cmd/main -- md5 abc
 
 ## 测试
 
+仓库自带可复现的验证脚本（需要 Python 的 `numpy` 与 `soundfile`）：
+
+```bash
+python tools/verify.py matrix      # 48 例跨解码器矩阵，逐样本比对 STREAMINFO 摘要
+python tools/verify.py benchmark   # 同一段 PCM 上与 libFLAC 的体积对比
+```
+
+
 ```bash
 moon check --deny-warn
 moon test  --deny-warn
@@ -109,7 +117,7 @@ MD5 校验，因此这等于一个独立的 MoonBit 实现认可了本编码器�
 ## 路线图
 
 - [ ] 流式 / 增量编码（当前 API 需要整块 PCM 驻留内存）
-- [ ] 压缩率对齐 libFLAC：同一段 PCM 上，当前输出比 libFLAC 默认设置大 14%–96%（噪声信号基本持平），差距集中在 LPC 系数量化与分区代价模型
+- [ ] 压缩率对齐 libFLAC：同一段 PCM 上，当前输出比 libFLAC 默认设置大 12%–83%（噪声信号基本持平），差距集中在 LPC 系数量化与分区代价模型
 - [ ] 自适应块长
 - [ ] 12 / 20 / 32 bit 的参考解码器验证（当前矩阵覆盖 8 / 16 / 24）
 
