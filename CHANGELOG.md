@@ -4,6 +4,15 @@ All notable changes to `moonflac-encoder` are documented here. The format follow
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] - 2026-10-23
+
+### Fixed
+
+- The published 0.5.0 package shipped the previous README, which claimed a
+  throughput of 80-120M samples/s. The measured figure is about 0.8M samples/s
+  (roughly 18x realtime, with about 20 percent run to run variance). A version
+  cannot be republished, so this release carries the corrected README.
+
 ## [0.5.0] - 2026-10-23
 
 ### Changed
