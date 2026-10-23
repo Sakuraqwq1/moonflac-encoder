@@ -78,7 +78,7 @@ out = out + @moonflac_encoder.stream_finish(encoder)     // 冲掉最后一个�
 
 ## 性能
 
-`python tools/verify.py perf` 实测（Windows，native 目标，16-bit 单声道整数锯齿波，避开信号合成的开销）：**约 80–120 万样本/秒**，约 18–27 倍实时（测量波动约 ±20%）。
+`python tools/verify.py perf` 实测（Windows，native 目标，16-bit 单声道整数锯齿波，避开信号合成的开销）：**约 80 万样本/秒**（约 18 倍实时，测量波动 ±20%）。
 
 每个声道平面每帧只规划一次，写出直接复用规划结果（含子帧类型、LPC 系数与分区阶）；代价计算、选型与写出共用同一个 Rice 参数搜索函数，因此既没有重复搜索，选型代价与实际写出的位数也严格一致。
 
