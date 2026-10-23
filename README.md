@@ -78,7 +78,9 @@ out = out + @moonflac_encoder.stream_finish(encoder)     // 冲掉最后一个�
 
 ## 性能
 
-`python tools/verify.py perf` 实测（Windows，native 目标，16-bit 单声道）：约 **60 万样本/秒**，约 13 倍实时。已知瓶颈是立体声选型：每个候选声道编码都写进草稿写入器再量位长，等于把子帧写了近十遍；改成纯计数即可显著提速，已列入路线图。
+`python tools/verify.py perf` 实测（Windows，native 目标，16-bit 单声道整数锯齿波，避开信号合成的开销）：**约 70–85 万样本/秒**，约 16–19 倍实时。
+
+这一版把子帧规划与写出拆开了（`plan_plane_subframe` / `write_plane_subframe`），立体声选型不再为每个候选写一遍位流；同时 `write_bits` / `write_unary` 在字节对齐时整字节落盘。测量本身的波动约 ±20%，所以这些改动的收益只能算在噪声量级以内——目前的主要开销在 LPC 搜索与分区搜索的反复遍历，那是下一步的事。
 
 ## 验证方式
 

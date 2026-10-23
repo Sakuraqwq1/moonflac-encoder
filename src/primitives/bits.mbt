@@ -40,7 +40,17 @@ pub fn BitWriter::write_bits(
   value : Int64,
   count : Int32,
 ) -> Unit {
-  let mut index = count - 1
+  // Whole bytes go straight to the buffer when the writer is aligned: residual
+  // remainders and sample values are most of FLAC's bits, and the per-bit path
+  // costs a method call each.
+  let mut remaining = count
+  let mut shift = count
+  while remaining >= 8 && self.filled == 0 {
+    shift = shift - 8
+    self.buffer.write_byte(((value >> shift) & 0xFFL).to_byte())
+    remaining = remaining - 8
+  }
+  let mut index = remaining - 1
   while index >= 0 {
     self.write_bit(((value >> index) & 1L).to_int())
     index = index - 1
@@ -67,7 +77,12 @@ pub fn BitWriter::write_signed(
 ///|
 /// Append `value` zeros followed by a one (FLAC's unary code).
 pub fn BitWriter::write_unary(self : BitWriter, value : Int32) -> Unit {
-  for _index = 0; _index < value; _index = _index + 1 {
+  let mut remaining = value
+  while remaining >= 8 && self.filled == 0 {
+    self.buffer.write_byte(0x00)
+    remaining = remaining - 8
+  }
+  for _index = 0; _index < remaining; _index = _index + 1 {
     self.write_bit(0)
   }
   self.write_bit(1)

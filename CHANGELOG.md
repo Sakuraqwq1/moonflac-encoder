@@ -4,6 +4,21 @@ All notable changes to `moonflac-encoder` are documented here. The format follow
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-10-22
+
+### Changed
+
+- **Subframe planning is separate from writing.** `plan_plane_subframe` computes
+  the coding decision and its exact bit cost without touching a writer, so the
+  stereo assignment search no longer writes every candidate to a scratch buffer.
+- **`write_bits` and `write_unary` write whole bytes** when the writer is byte
+  aligned instead of looping one bit at a time.
+- `tools/verify.py perf` now measures with an integer sawtooth, so the number
+  reflects encoding rather than signal synthesis. Measured range: 0.7–0.85M
+  samples/s (about 16–19x realtime for 16 bit mono). Run-to-run variance is
+  around 20%, so the two changes above are within noise; the dominant cost is
+  now the repeated passes in the LPC and partition searches.
+
 ## [0.4.0] - 2026-10-22
 
 ### Added

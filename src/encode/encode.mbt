@@ -353,9 +353,8 @@ fn build_frame(
 /// Bit cost of writing one channel, measured by writing it into a scratch
 /// writer so the estimate can never drift from what `write_subframe` emits.
 fn cost_subframe(plane : Array[Int64], bits : Int32) -> Int64 {
-  let scratch = @primitives.BitWriter::new()
-  write_plane_subframe(scratch, plane, bits)
-  scratch.bit_length()
+  let plan = Array::make(35, 0L)
+  plan_plane_subframe(plane, bits, plan)
 }
 
 ///|
@@ -370,6 +369,65 @@ fn write_plane_subframe(
   bits : Int32,
 ) -> Unit {
   let count = plane.length()
+  let plan = Array::make(35, 0L)
+  let _cost = plan_plane_subframe(plane, bits, plan)
+  let code = plan[33].to_int()
+  frame.write_bit(0)
+  frame.write_bits(code.to_int64(), 6)
+  frame.write_bit(0)
+  if code == 0 {
+    frame.write_signed(plane[0], bits)
+    return
+  }
+  if code == 1 {
+    for value in plane {
+      frame.write_signed(value, bits)
+    }
+    return
+  }
+  if code < 32 {
+    let order = code - 8
+    for index = 0; index < order; index = index + 1 {
+      frame.write_signed(plane[index], bits)
+    }
+    let residual = fixed_residual(plane, order)
+    let partition = best_partition(residual, count, order)
+    frame.write_bits(0L, 2)
+    frame.write_bits(partition.to_int64(), 4)
+    write_partitions(frame, residual, count, order, partition)
+    return
+  }
+  let order = code - 32 + 1
+  for index = 0; index < order; index = index + 1 {
+    frame.write_signed(plane[index], bits)
+  }
+  frame.write_bits(14L, 4)
+  let shift = plan[34].to_int()
+  frame.write_signed(plan[34], 5)
+  for index = 1; index <= order; index = index + 1 {
+    frame.write_signed(plan[index], 15)
+  }
+  let residual = lpc_residual(plane, order, plan, shift)
+  let partition = best_partition(residual, count, order)
+  frame.write_bits(0L, 2)
+  frame.write_bits(partition.to_int64(), 4)
+  write_partitions(frame, residual, count, order, partition)
+}
+
+///|
+/// Compute how `plane` would be coded without emitting anything.
+///
+/// Layout of `plan`: slots 1..32 hold the quantised LPC coefficients (index 1
+/// is the first tap, so `lpc_residual` can read it directly), slot 33 holds the
+/// subframe type code and slot 34 the LPC shift. The return value is the exact
+/// bit cost. Stereo assignment selection calls this for every candidate, so it
+/// must not touch a writer: that is what made encoding slow.
+fn plan_plane_subframe(
+  plane : Array[Int64],
+  bits : Int32,
+  plan : Array[Int64],
+) -> Int64 {
+  let count = plane.length()
   let first = plane[0]
   let mut index = 1
   let mut constant = true
@@ -380,12 +438,12 @@ fn write_plane_subframe(
     index = index + 1
   }
   if constant {
-    write_constant(frame, first, bits)
-    return
+    plan[33] = 0L
+    plan[34] = 0L
+    return (8 + bits).to_int64()
   }
   let mut best_code = 1
   let mut best_bits = (8 + count * bits).to_int64()
-  let mut best_shift = 0
   for order = 0; order <= 4; order = order + 1 {
     if order < count {
       let residual = fixed_residual(plane, order)
@@ -411,56 +469,14 @@ fn write_plane_subframe(
     lpc_bits * 100L < verbatim_bits * 95L {
     best_bits = lpc_bits
     best_code = choice[0].to_int()
-    best_shift = choice[2].to_int()
-  }
-  frame.write_bit(0)
-  frame.write_bits(best_code.to_int64(), 6)
-  frame.write_bit(0)
-  if best_code == 1 {
-    for value in plane {
-      frame.write_signed(value, bits)
+    plan[34] = choice[2]
+    let order = best_code - 32 + 1
+    for tap = 1; tap <= order; tap = tap + 1 {
+      plan[tap] = coefficients[tap]
     }
-    return
   }
-  if best_code < 32 {
-    let order = best_code - 8
-    for index = 0; index < order; index = index + 1 {
-      frame.write_signed(plane[index], bits)
-    }
-    let residual = fixed_residual(plane, order)
-    let partition = best_partition(residual, count, order)
-    frame.write_bits(0L, 2)
-    frame.write_bits(partition.to_int64(), 4)
-    write_partitions(frame, residual, count, order, partition)
-    return
-  }
-  let order = best_code - 32 + 1
-  for index = 0; index < order; index = index + 1 {
-    frame.write_signed(plane[index], bits)
-  }
-  frame.write_bits(14L, 4)
-  frame.write_signed(best_shift.to_int64(), 5)
-  for index = 1; index <= order; index = index + 1 {
-    frame.write_signed(coefficients[index], 15)
-  }
-  let residual = lpc_residual(plane, order, coefficients, best_shift)
-  let partition = best_partition(residual, count, order)
-  frame.write_bits(0L, 2)
-  frame.write_bits(partition.to_int64(), 4)
-  write_partitions(frame, residual, count, order, partition)
-}
-
-///|
-/// CONSTANT subframe: every sample has the same value.
-fn write_constant(
-  frame : @primitives.BitWriter,
-  value : Int64,
-  bits : Int32,
-) -> Unit {
-  frame.write_bit(0)
-  frame.write_bits(0L, 6)
-  frame.write_bit(0)
-  frame.write_signed(value, bits)
+  plan[33] = best_code.to_int64()
+  best_bits
 }
 
 ///|

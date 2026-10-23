@@ -188,7 +188,9 @@ def run_perf(rate):
     def timed(frames):
         start = time.perf_counter()
         proc = subprocess.run(
-            [MOON, "run", "cmd/main", "--", "gen", str(rate), "1", "16", str(frames), "1"],
+            # kind 3 is an integer sawtooth: cheap to synthesise, so the
+            # measurement reflects encoding rather than signal generation.
+            [MOON, "run", "cmd/main", "--", "gen", str(rate), "1", "16", str(frames), "3"],
             cwd=ROOT, capture_output=True, text=True,
         )
         if proc.returncode != 0 or "FLACBEGIN" not in proc.stdout:
