@@ -26,7 +26,7 @@ All notable changes to `moonflac-encoder` are documented here. The format follow
   at 0.8–1.2M samples/s (about 18–27x realtime for 16 bit mono, run-to-run
   variance around 20%).
 
-## [0.4.3] - 2026-10-22
+## [0.4.3] - 2026-10-23
 
 ### Fixed
 
@@ -34,7 +34,7 @@ All notable changes to `moonflac-encoder` are documented here. The format follow
   signals are smaller than libFLAC's default output (only the mono sine is 3.2%
   larger), not 6.
 
-## [0.4.2] - 2026-10-22
+## [0.4.2] - 2026-10-23
 
 ### Changed
 
@@ -42,7 +42,7 @@ All notable changes to `moonflac-encoder` are documented here. The format follow
   twice (saying 0.2.0 while 0.4.0 shipped, then 0.4.0 while 0.4.1 shipped), so
   the version now lives only in CHANGELOG and moon.mod.
 
-## [0.4.1] - 2026-10-22
+## [0.4.1] - 2026-10-23
 
 ### Changed
 
@@ -57,7 +57,7 @@ All notable changes to `moonflac-encoder` are documented here. The format follow
   around 20%, so the two changes above are within noise; the dominant cost is
   now the repeated passes in the LPC and partition searches.
 
-## [0.4.0] - 2026-10-22
+## [0.4.0] - 2026-10-23
 
 ### Added
 
@@ -75,7 +75,7 @@ All notable changes to `moonflac-encoder` are documented here. The format follow
   is the next optimisation.
 - CLI `stream` command, so the incremental path can be exercised end to end.
 
-## [0.3.0] - 2026-10-22
+## [0.3.0] - 2026-10-23
 
 ### Fixed
 
@@ -106,7 +106,7 @@ All notable changes to `moonflac-encoder` are documented here. The format follow
 - After these changes 6 of the 10 benchmark signals are smaller than libFLAC's
   default output, the worst case is 3.2% larger, and noise is at parity.
 
-## [0.2.2] - 2026-10-22
+## [0.2.2] - 2026-10-23
 
 ### Changed
 
