@@ -4,6 +4,28 @@ All notable changes to `moonflac-encoder` are documented here. The format follow
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-10-23
+
+### Changed
+
+- **Subframe selection now costs the Rice partition search exactly.** The
+  FIXED orders and the LPC orders are first ranked with a single-partition
+  estimate, then the two survivors are costed again with the full partition
+  search, because the partition gain differs between candidates and a proxy
+  comparison alone can pick the wrong family. The LPC cost also gained the
+  six residual header bits it was missing. The winning partition order is
+  stored in the plan and the writer reuses it instead of searching again.
+- **Each plane is planned once per frame.** The stereo assignment search
+  shares the four per-plane plans with the writer, so no candidate is costed
+  or searched twice.
+- **The Rice parameter search returns the exact cost alongside the
+  parameter.** Costing, planning and writing share one function, implemented
+  as two scans with four accumulators; the candidate set and tie-breaking are
+  unchanged. Benchmark sizes are identical to 0.4.3 — the previous heuristic
+  already made the same decisions on the test signals — and throughput stays
+  at 0.8–1.2M samples/s (about 18–27x realtime for 16 bit mono, run-to-run
+  variance around 20%).
+
 ## [0.4.3] - 2026-10-22
 
 ### Fixed

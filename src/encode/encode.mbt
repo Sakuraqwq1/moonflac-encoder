@@ -276,6 +276,15 @@ fn build_frame(
   let mut final_code = channel_code
   let mut payload = planes
   let mut depths = Array::make(channels, bits)
+  // Each plane is planned exactly once and the written subframes reuse that
+  // plan, so nothing is costed or searched twice.
+  let mut plans : Array[Array[Int64]] = []
+  let costs : Array[Int64] = []
+  for channel = 0; channel < channels; channel = channel + 1 {
+    let plan = Array::make(35, 0L)
+    costs.push(plan_plane_subframe(planes[channel], bits, plan))
+    plans.push(plan)
+  }
   if channels == 2 {
     let left = planes[0]
     let right = planes[1]
@@ -285,27 +294,36 @@ fn build_frame(
       side[index] = left[index] - right[index]
       mid[index] = (left[index] + right[index]) >> 1
     }
-    let independent = cost_subframe(left, bits) + cost_subframe(right, bits)
-    let left_side = cost_subframe(left, bits) + cost_subframe(side, bits + 1)
-    let right_side = cost_subframe(side, bits + 1) + cost_subframe(right, bits)
-    let mid_side = cost_subframe(mid, bits) + cost_subframe(side, bits + 1)
+    let plan_left = plans[0]
+    let plan_right = plans[1]
+    let plan_side = Array::make(35, 0L)
+    let cost_side = plan_plane_subframe(side, bits + 1, plan_side)
+    let plan_mid = Array::make(35, 0L)
+    let cost_mid = plan_plane_subframe(mid, bits, plan_mid)
+    let independent = costs[0] + costs[1]
+    let left_side = costs[0] + cost_side
+    let right_side = cost_side + costs[1]
+    let mid_side = cost_mid + cost_side
     let mut best = independent
     if left_side < best {
       best = left_side
       final_code = 8
       payload = [left, side]
       depths = [bits, bits + 1]
+      plans = [plan_left, plan_side]
     }
     if right_side < best {
       best = right_side
       final_code = 9
       payload = [side, right]
       depths = [bits + 1, bits]
+      plans = [plan_side, plan_right]
     }
     if mid_side < best {
       final_code = 10
       payload = [mid, side]
       depths = [bits, bits + 1]
+      plans = [plan_mid, plan_side]
     }
   }
   let (size_code, wide_size) = block_size_code(count)
@@ -336,7 +354,12 @@ fn build_frame(
   frame.write_bytes(header_bytes)
   frame.write_bits(@primitives.crc8(header_bytes).to_int64(), 8)
   for channel = 0; channel < channels; channel = channel + 1 {
-    write_plane_subframe(frame, payload[channel], depths[channel])
+    write_plane_subframe(
+      frame,
+      payload[channel],
+      depths[channel],
+      plans[channel],
+    )
   }
   let body = frame.finish()
   let checksum = @primitives.crc16(body)
@@ -350,27 +373,17 @@ fn build_frame(
 }
 
 ///|
-/// Bit cost of writing one channel, measured by writing it into a scratch
-/// writer so the estimate can never drift from what `write_subframe` emits.
-fn cost_subframe(plane : Array[Int64], bits : Int32) -> Int64 {
-  let plan = Array::make(35, 0L)
-  plan_plane_subframe(plane, bits, plan)
-}
-
-///|
-/// Pick the cheapest of CONSTANT, FIXED order 0..4 and VERBATIM for one channel.
+/// Write the subframe that `plan` chose for one channel.
 ///
-/// The estimate is exact: each candidate is costed in bits, including the
-/// subframe header and the residual partition header, so the choice always
-/// shrinks the frame or leaves it as VERBATIM.
+/// The type code, the LPC coefficients and the Rice partition order all come
+/// from the plan, so nothing is searched a second time here.
 fn write_plane_subframe(
   frame : @primitives.BitWriter,
   plane : Array[Int64],
   bits : Int32,
+  plan : Array[Int64],
 ) -> Unit {
   let count = plane.length()
-  let plan = Array::make(35, 0L)
-  let _cost = plan_plane_subframe(plane, bits, plan)
   let code = plan[33].to_int()
   frame.write_bit(0)
   frame.write_bits(code.to_int64(), 6)
@@ -391,7 +404,7 @@ fn write_plane_subframe(
       frame.write_signed(plane[index], bits)
     }
     let residual = fixed_residual(plane, order)
-    let partition = best_partition(residual, count, order)
+    let partition = plan[0].to_int()
     frame.write_bits(0L, 2)
     frame.write_bits(partition.to_int64(), 4)
     write_partitions(frame, residual, count, order, partition)
@@ -408,7 +421,7 @@ fn write_plane_subframe(
     frame.write_signed(plan[index], 15)
   }
   let residual = lpc_residual(plane, order, plan, shift)
-  let partition = best_partition(residual, count, order)
+  let partition = plan[0].to_int()
   frame.write_bits(0L, 2)
   frame.write_bits(partition.to_int64(), 4)
   write_partitions(frame, residual, count, order, partition)
@@ -417,11 +430,19 @@ fn write_plane_subframe(
 ///|
 /// Compute how `plane` would be coded without emitting anything.
 ///
-/// Layout of `plan`: slots 1..32 hold the quantised LPC coefficients (index 1
-/// is the first tap, so `lpc_residual` can read it directly), slot 33 holds the
-/// subframe type code and slot 34 the LPC shift. The return value is the exact
-/// bit cost. Stereo assignment selection calls this for every candidate, so it
-/// must not touch a writer: that is what made encoding slow.
+/// Layout of `plan`: slot 0 holds the residual partition order of the chosen
+/// FIXED or LPC candidate, slots 1..32 hold the quantised LPC coefficients
+/// (index 1 is the first tap, so `lpc_residual` can read them directly), slot
+/// 33 holds the subframe type code and slot 34 the LPC shift. The return value
+/// is the exact bit cost. Stereo assignment selection calls this for every
+/// candidate, so it must not touch a writer: that is what made encoding slow.
+///
+/// The FIXED orders and the LPC orders are first ranked with a single
+/// partition Rice estimate, then the surviving FIXED and LPC candidates are
+/// costed again with the full partition search: the partition gain differs
+/// between candidates, so a proxy comparison alone can pick the wrong family.
+/// The returned cost and the stored partition order always describe exactly
+/// what `write_plane_subframe` emits.
 fn plan_plane_subframe(
   plane : Array[Int64],
   bits : Int32,
@@ -442,37 +463,59 @@ fn plan_plane_subframe(
     plan[34] = 0L
     return (8 + bits).to_int64()
   }
-  let mut best_code = 1
-  let mut best_bits = (8 + count * bits).to_int64()
+  let mut fixed_order = -1
+  let mut fixed_estimate = 0L
   for order = 0; order <= 4; order = order + 1 {
     if order < count {
       let residual = fixed_residual(plane, order)
-      let parameter = best_rice_parameter(residual)
-      let cost = (8 + order * bits + 6 + 4).to_int64() +
-        rice_bits(residual, parameter)
-      if cost < best_bits {
-        best_bits = cost
-        best_code = 8 + order
+      let (_parameter, rice_cost) = best_parameter_cost(
+        residual,
+        0,
+        residual.length(),
+      )
+      let cost = (8 + order * bits + 6 + 4).to_int64() + rice_cost
+      if fixed_order < 0 || cost < fixed_estimate {
+        fixed_estimate = cost
+        fixed_order = order
       }
     }
   }
   let choice = Array::make(4, 0L)
   let coefficients = Array::make(33, 0L)
-  let lpc_bits = lpc_search(plane, bits, choice, coefficients)
+  let lpc_estimate = lpc_search(plane, bits, choice, coefficients)
+  let verbatim_bits = (8 + count * bits).to_int64()
+  let mut best_code = 1
+  let mut best_bits = verbatim_bits
+  if fixed_order >= 0 {
+    let residual = fixed_residual(plane, fixed_order)
+    let partition = best_partition(residual, count, fixed_order)
+    let cost = (8 + fixed_order * bits + 6).to_int64() +
+      partition_cost(residual, count, fixed_order, partition)
+    if cost < best_bits {
+      best_bits = cost
+      best_code = 8 + fixed_order
+      plan[0] = partition.to_int64()
+    }
+  }
   // Only take LPC when it is clearly better than storing the samples. On
   // noise-like blocks LPC wins by a fraction of a percent, which is not worth
   // the extra decoder work (and is the regime where the predictor is least
   // trustworthy), so require a five percent margin.
-  let verbatim_bits = (8 + count * bits).to_int64()
-  if lpc_bits >= 0L &&
-    lpc_bits < best_bits &&
-    lpc_bits * 100L < verbatim_bits * 95L {
-    best_bits = lpc_bits
-    best_code = choice[0].to_int()
-    plan[34] = choice[2]
-    let order = best_code - 32 + 1
-    for tap = 1; tap <= order; tap = tap + 1 {
-      plan[tap] = coefficients[tap]
+  if lpc_estimate >= 0L {
+    let order = choice[1].to_int()
+    let shift = choice[2].to_int()
+    let residual = lpc_residual(plane, order, coefficients, shift)
+    let partition = best_partition(residual, count, order)
+    let cost = (8 + order * bits + 4 + 5 + order * 15 + 6).to_int64() +
+      partition_cost(residual, count, order, partition)
+    if cost < best_bits && cost * 100L < verbatim_bits * 95L {
+      best_bits = cost
+      best_code = choice[0].to_int()
+      plan[0] = partition.to_int64()
+      plan[34] = choice[2]
+      for tap = 1; tap <= order; tap = tap + 1 {
+        plan[tap] = coefficients[tap]
+      }
     }
   }
   plan[33] = best_code.to_int64()
@@ -607,9 +650,9 @@ fn quantise_into(
 ///|
 /// Search the LPC orders and keep the cheapest one.
 ///
-/// `choice` receives `[code, order, shift, rice parameter]` and `coefficients`
-/// receives the quantised taps. Returns the bit cost, or -1 when LPC is not
-/// applicable (a block too short to fit a warmup).
+/// `choice` receives `[code, order, shift]` and `coefficients` receives the
+/// quantised taps. Returns the bit cost, or -1 when LPC is not applicable (a
+/// block too short to fit a warmup).
 fn lpc_search(
   plane : Array[Int64],
   bits : Int32,
@@ -706,15 +749,18 @@ fn lpc_search(
       let accumulator = lpc_max_sum(plane, order, scratch)
       if accumulator < 1073741824L {
         let residual = lpc_residual(plane, order, scratch, shift)
-        let parameter = best_rice_parameter(residual)
+        let (_parameter, rice_cost) = best_parameter_cost(
+          residual,
+          0,
+          residual.length(),
+        )
         let cost = (8 + order * bits + 4 + 5 + order * 15).to_int64() +
-          rice_bits(residual, parameter)
+          rice_cost
         if best_bits < 0L || cost < best_bits {
           best_bits = cost
           choice[0] = (32 + order - 1).to_int64()
           choice[1] = order.to_int64()
           choice[2] = shift.to_int64()
-          choice[3] = parameter.to_int64()
           for tap = 1; tap <= order; tap = tap + 1 {
             coefficients[tap] = scratch[tap]
           }
@@ -748,8 +794,8 @@ fn partition_cost(
   for index = 0; index < parts; index = index + 1 {
     let length = if index == 0 { size - order } else { size }
     if length > 0 {
-      let k = best_parameter_range(residual, offset, length)
-      total = total + 4L + rice_bits_range(residual, offset, length, k)
+      let (_k, cost) = best_parameter_cost(residual, offset, length)
+      total = total + 4L + cost
       offset = offset + length
     }
   }
@@ -810,7 +856,7 @@ fn write_partitions(
   for index = 0; index < parts; index = index + 1 {
     let length = if index == 0 { size - order } else { size }
     if length > 0 {
-      let k = best_parameter_range(residual, offset, length)
+      let (k, _cost) = best_parameter_cost(residual, offset, length)
       frame.write_bits(k.to_int64(), 4)
       write_rice_range(frame, residual, offset, length, k)
       offset = offset + length
@@ -829,71 +875,67 @@ fn zigzag(value : Int64) -> Int64 {
 }
 
 ///|
-/// Exact cost of Rice coding `length` values of `residual` starting at `start`.
-fn rice_bits_range(
-  residual : Array[Int64],
-  start : Int32,
-  length : Int32,
-  k : Int32,
-) -> Int64 {
-  let mut total = 0L
-  let end = start + length
-  for index = start; index < end; index = index + 1 {
-    let folded = zigzag(residual[index])
-    total = total + ((folded >> k) + 1L + k.to_int64())
-  }
-  total
-}
-
-///|
-/// Exact cost of Rice coding the whole residual.
-fn rice_bits(residual : Array[Int64], k : Int32) -> Int64 {
-  rice_bits_range(residual, 0, residual.length(), k)
-}
-
-///|
-/// Pick the Rice parameter that codes `residual` in the fewest bits.
+/// Pick the Rice parameter for one partition and report its exact bit cost.
 ///
-/// The mean folded value gives a close estimate, so only three candidates are
-/// costed instead of the full 0..14 range.
-fn best_rice_parameter(residual : Array[Int64]) -> Int32 {
-  best_parameter_range(residual, 0, residual.length())
-}
-
-///|
-/// Pick the Rice parameter for one partition.
-fn best_parameter_range(
+/// The mean folded value locates the right parameter closely, so one pass
+/// computes it and a second pass costs the candidates around it — and the
+/// escape parameter 14 — exactly, in one scan with one accumulator each. The
+/// returned cost is what `write_rice_range` emits for the chosen parameter,
+/// and costing, planning and writing all share this function, so they cannot
+/// drift apart.
+fn best_parameter_cost(
   residual : Array[Int64],
   start : Int32,
   length : Int32,
-) -> Int32 {
+) -> (Int32, Int64) {
   if length <= 0 {
-    return 0
+    return (0, 0L)
   }
-  let mut sum = 0L
   let end = start + length
+  let mut sum = 0L
   for index = start; index < end; index = index + 1 {
     sum = sum + zigzag(residual[index])
   }
   let mean = sum / length.to_int64()
-  let mut estimate = 0
+  let mut base = 0
   let mut probe = mean
   while probe > 1L {
     probe = probe >> 1
-    estimate = estimate + 1
+    base = base + 1
   }
-  let base = if estimate > 14 { 14 } else { estimate }
+  if base > 14 {
+    base = 14
+  }
+  let low = if base > 0 { base - 1 } else { 0 }
+  let high = if base < 14 { base + 1 } else { 14 }
+  let mut sum_low = 0L
+  let mut sum_base = 0L
+  let mut sum_high = 0L
+  let mut sum_escape = 0L
+  for index = start; index < end; index = index + 1 {
+    let folded = zigzag(residual[index])
+    sum_low = sum_low + (folded >> low)
+    sum_base = sum_base + (folded >> base)
+    sum_high = sum_high + (folded >> high)
+    sum_escape = sum_escape + (folded >> 14)
+  }
+  let count = length.to_int64()
   let mut best_k = 14
-  let mut best_bits = rice_bits_range(residual, start, length, 14)
-  for delta = -1; delta <= 1; delta = delta + 1 {
-    let candidate = base + delta
-    if candidate >= 0 && candidate <= 14 {
-      let cost = rice_bits_range(residual, start, length, candidate)
-      if cost < best_bits {
-        best_bits = cost
-        best_k = candidate
-      }
-    }
+  let mut best_bits = sum_escape + count * 15L
+  let cost_low = sum_low + count * (1L + low.to_int64())
+  if cost_low < best_bits {
+    best_bits = cost_low
+    best_k = low
   }
-  best_k
+  let cost_base = sum_base + count * (1L + base.to_int64())
+  if cost_base < best_bits {
+    best_bits = cost_base
+    best_k = base
+  }
+  let cost_high = sum_high + count * (1L + high.to_int64())
+  if cost_high < best_bits {
+    best_bits = cost_high
+    best_k = high
+  }
+  (best_k, best_bits)
 }
