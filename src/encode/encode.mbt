@@ -397,7 +397,14 @@ fn write_plane_subframe(
   let choice = Array::make(4, 0L)
   let coefficients = Array::make(33, 0L)
   let lpc_bits = lpc_search(plane, bits, choice, coefficients)
-  if lpc_bits >= 0L && lpc_bits < best_bits {
+  // Only take LPC when it is clearly better than storing the samples. On
+  // noise-like blocks LPC wins by a fraction of a percent, which is not worth
+  // the extra decoder work (and is the regime where the predictor is least
+  // trustworthy), so require a five percent margin.
+  let verbatim_bits = (8 + count * bits).to_int64()
+  if lpc_bits >= 0L &&
+    lpc_bits < best_bits &&
+    lpc_bits * 100L < verbatim_bits * 95L {
     best_bits = lpc_bits
     best_code = choice[0].to_int()
     best_shift = choice[2].to_int()
@@ -503,11 +510,40 @@ fn lpc_residual(
 }
 
 ///|
+/// Largest absolute predictor accumulator this coefficient set produces.
+///
+/// FLAC decoders may implement the predictor with 32 bit accumulators, so an
+/// encoder must keep the sum inside that range. Estimating it from the sample
+/// magnitude is not enough (the coefficients can be much larger than the
+/// signal), so the real maximum is measured here and the candidate rejected
+/// when it does not fit.
+fn lpc_max_sum(
+  plane : Array[Int64],
+  order : Int32,
+  coefficients : Array[Int64],
+) -> Int64 {
+  let count = plane.length()
+  let mut maximum = 0L
+  for index = order; index < count; index = index + 1 {
+    let mut sum = 0L
+    for tap = 1; tap <= order; tap = tap + 1 {
+      sum = sum + coefficients[tap] * plane[index - tap]
+    }
+    let magnitude = if sum < 0L { -sum } else { sum }
+    if magnitude > maximum {
+      maximum = magnitude
+    }
+  }
+  maximum
+}
+
+///|
 /// Quantise one order's prediction coefficients into `out`, returning the right
 /// shift the decoder has to apply.
 fn quantise_into(
   row : Array[Double],
   precision : Int32,
+  shift_limit : Int32,
   out : Array[Int64],
 ) -> Int32 {
   let order = row.length() - 1
@@ -522,7 +558,7 @@ fn quantise_into(
   let mut shift = 0
   if max_abs > 0.0 {
     let mut scaled = max_abs
-    while scaled * 2.0 < ceiling && shift < 15 {
+    while scaled * 2.0 < ceiling && shift < 15 && shift < shift_limit {
       scaled = scaled * 2.0
       shift = shift + 1
     }
@@ -568,18 +604,28 @@ fn lpc_search(
   if max_order < 1 {
     return -1L
   }
+  // Apodization matters far more than it looks. The plain autocorrelation
+  // method is ill conditioned for resonant signals (a pure tone gives
+  // 1 - a^2 ~ 0.004), so small estimation errors move the predictor away from
+  // the true poles and the residual grows by a factor of three. Windowing the
+  // block first restores the correct coefficients, which is what libFLAC does.
+  let windowed = Array::make(count, 0.0)
+  let denominator = if count > 1 { (count - 1).to_double() } else { 1.0 }
+  for index = 0; index < count; index = index + 1 {
+    let weight = 0.5 -
+      0.5 * @math.cos(6.283185307179586 * index.to_double() / denominator)
+    windowed[index] = plane[index].to_double() * weight
+  }
   let mut mean = 0.0
-  for value in plane {
-    mean = mean + value.to_double()
+  for value in windowed {
+    mean = mean + value
   }
   mean = mean / count.to_double()
   let ac = Array::make(max_order + 1, 0.0)
   for lag = 0; lag <= max_order; lag = lag + 1 {
     let mut sum = 0.0
     for index = lag; index < count; index = index + 1 {
-      sum = sum +
-        (plane[index].to_double() - mean) *
-        (plane[index - lag].to_double() - mean)
+      sum = sum + (windowed[index] - mean) * (windowed[index - lag] - mean)
     }
     ac[lag] = sum
   }
@@ -624,22 +670,34 @@ fn lpc_search(
   }
   let mut best_bits = -1L
   let scratch = Array::make(33, 0L)
+  // The predictor sum has to stay inside 32 bits: order * max_coefficient *
+  // max_sample * 2^shift < 2^30. Without this bound a 17 bit side channel with
+  // 15 bit coefficients overflows, and 32 bit decoders (libsndfile among them)
+  // then decode a different signal.
+
   for delta = -1; delta <= 1; delta = delta + 1 {
     let order = candidate + delta
     if order >= 1 && order <= max_order {
-      let shift = quantise_into(rows[order], 15, scratch)
-      let residual = lpc_residual(plane, order, scratch, shift)
-      let parameter = best_rice_parameter(residual)
-      let cost = (8 + order * bits + 4 + 5 + order * 15).to_int64() +
-        rice_bits(residual, parameter)
-      if best_bits < 0L || cost < best_bits {
-        best_bits = cost
-        choice[0] = (32 + order - 1).to_int64()
-        choice[1] = order.to_int64()
-        choice[2] = shift.to_int64()
-        choice[3] = parameter.to_int64()
-        for tap = 1; tap <= order; tap = tap + 1 {
-          coefficients[tap] = scratch[tap]
+      let row = rows[order]
+      // The exact accumulator check below decides whether a candidate is safe,
+      // so the quantiser is free to use the full 15 bit precision here.
+      let shift_limit = 15
+      let shift = quantise_into(row, 15, shift_limit, scratch)
+      let accumulator = lpc_max_sum(plane, order, scratch)
+      if accumulator < 1073741824L {
+        let residual = lpc_residual(plane, order, scratch, shift)
+        let parameter = best_rice_parameter(residual)
+        let cost = (8 + order * bits + 4 + 5 + order * 15).to_int64() +
+          rice_bits(residual, parameter)
+        if best_bits < 0L || cost < best_bits {
+          best_bits = cost
+          choice[0] = (32 + order - 1).to_int64()
+          choice[1] = order.to_int64()
+          choice[2] = shift.to_int64()
+          choice[3] = parameter.to_int64()
+          for tap = 1; tap <= order; tap = tap + 1 {
+            coefficients[tap] = scratch[tap]
+          }
         }
       }
     }

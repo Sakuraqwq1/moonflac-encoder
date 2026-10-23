@@ -4,6 +4,37 @@ All notable changes to `moonflac-encoder` are documented here. The format follow
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-10-22
+
+### Fixed
+
+- **LPC analysis now apodizes the block first.** The plain autocorrelation
+  method is ill conditioned for resonant material: a pure tone has
+  `1 - a^2 ~ 0.004`, so small estimation errors moved the predictor off the
+  true poles and the residual was roughly three times larger than necessary.
+  Applying a Hann window before the autocorrelation restores the correct
+  coefficients. The measured effect on 4096 frame blocks: mono sine 1,896 to
+  1,326 bytes, mono two-tone 3,490 to 1,634 bytes, stereo two-tone 5,363 to
+  3,124 bytes.
+- **The predictor accumulator is bounded to 32 bits.** A 17 bit side channel
+  with 15 bit coefficients and order 12 overflowed, which produced streams that
+  32 bit decoders decode differently (libsndfile rejected them). Candidates whose
+  measured accumulator exceeds 2^30 are now rejected.
+
+### Added
+
+- **`tools/flacdump.py`**: parses frame and subframe headers and prints the
+  coding decision of every subframe (type, LPC order / precision / shift, Rice
+  partition order and parameters) plus a bit breakdown. This is what made the
+  compression gap diagnosable.
+- **LPC gain gate**: LPC is only used when it beats VERBATIM by at least five
+  percent, so noise-like blocks fall back to storing the samples.
+
+### Changed
+
+- After these changes 6 of the 10 benchmark signals are smaller than libFLAC's
+  default output, the worst case is 3.2% larger, and noise is at parity.
+
 ## [0.2.2] - 2026-10-22
 
 ### Changed
