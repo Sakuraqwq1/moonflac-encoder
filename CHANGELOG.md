@@ -4,6 +4,14 @@ All notable changes to `moonflac-encoder` are documented here. The format follow
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.2] - 2026-10-22
+
+### Changed
+
+- The README status line no longer names a version. It had already drifted
+  twice (saying 0.2.0 while 0.4.0 shipped, then 0.4.0 while 0.4.1 shipped), so
+  the version now lives only in CHANGELOG and moon.mod.
+
 ## [0.4.1] - 2026-10-22
 
 ### Changed
