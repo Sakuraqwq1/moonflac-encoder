@@ -8,11 +8,22 @@ import {
 // Values
 pub fn encode(Array[Int64], Int32, Int32, Int32) -> Bytes raise @encode.EncodeError
 
+pub fn stream_encoder(Int32, Int32, Int32) -> StreamEncoder raise @encode.EncodeError
+
+pub fn stream_finish(StreamEncoder) -> Bytes
+
+pub fn stream_header(StreamEncoder) -> Bytes
+
+pub fn stream_write(StreamEncoder, Array[Int64]) -> Bytes raise @encode.EncodeError
+
 pub fn version() -> String
 
 // Errors
 
 // Types and methods
+pub struct StreamEncoder {
+  inner : @encode.StreamEncoder
+}
 
 // Type aliases
 

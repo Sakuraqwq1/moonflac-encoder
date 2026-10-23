@@ -138,9 +138,80 @@ def run_benchmark(frames, rate):
     return 0
 
 
+
+def run_stream_check(frames, rate):
+    """Streaming and one-shot encoding must produce identical frames.
+
+    The header differs on purpose: a stream cannot know the total sample count
+    or the PCM digest up front, so both are zero. Everything after the header is
+    the audio, and if those bytes match then the two files necessarily decode to
+    the same samples.
+    """
+    import numpy as np
+    import soundfile as sf
+
+    pcm = build_signal("two-tone", 2, frames, rate)
+    wav_path = os.path.join(tempfile.gettempdir(), "moonflac_stream_in.wav")
+    sf.write(wav_path, pcm, rate, subtype="PCM_16")
+    payload = base64.b64encode(open(wav_path, "rb").read()).decode()
+    env = dict(os.environ)
+    env["MOONFLAC_STREAM_B64"] = payload
+
+    def run(command):
+        proc = subprocess.run(
+            [MOON, "run", "cmd/main", "--", command, "@MOONFLAC_STREAM_B64"],
+            cwd=ROOT, capture_output=True, text=True, env=env,
+        )
+        lines = proc.stdout.splitlines()
+        if "FLACBEGIN" not in lines:
+            raise RuntimeError(proc.stderr.strip()[:200])
+        return base64.b64decode(lines[lines.index("FLACBEGIN") + 1])
+
+    oneshot = run("encode")
+    streamed = run("stream")
+    header = 42  # fLaC marker + 4 byte block header + 34 byte STREAMINFO
+    same_frames = oneshot[header:] == streamed[header:]
+    print(f"one-shot    : {len(oneshot):6d} bytes total, {len(oneshot) - header} bytes of frames")
+    print(f"streamed    : {len(streamed):6d} bytes total, {len(streamed) - header} bytes of frames")
+    print("STREAMINFO total samples (one-shot / streamed):", oneshot[8 + 13:8 + 18].hex(),
+          "/", streamed[8 + 13:8 + 18].hex())
+    print("frames identical" if same_frames else "FRAMES DIFFER")
+    print("PASS" if same_frames else "FAIL")
+    return 0 if same_frames else 1
+
+
+def run_perf(rate):
+    """Rough throughput: the difference between two encode sizes cancels process
+    startup, which would otherwise dominate."""
+    import time
+
+    def timed(frames):
+        start = time.perf_counter()
+        proc = subprocess.run(
+            [MOON, "run", "cmd/main", "--", "gen", str(rate), "1", "16", str(frames), "1"],
+            cwd=ROOT, capture_output=True, text=True,
+        )
+        if proc.returncode != 0 or "FLACBEGIN" not in proc.stdout:
+            raise RuntimeError(proc.stderr.strip()[:200])
+        return time.perf_counter() - start, proc.stdout
+
+    small, _ = timed(100_000)
+    large, out = timed(1_000_000)
+    frames = 900_000
+    seconds = large - small
+    if seconds <= 0:
+        print(f"small={small:.3f}s large={large:.3f}s  (too close to measure)")
+        return 1
+    per_second = frames / seconds
+    megabytes = per_second * 2 / 1e6  # mono 16 bit
+    print(f"encode time for 900,000 extra frames: {seconds:.3f}s")
+    print(f"throughput: {per_second:,.0f} samples/s  ({megabytes:.2f} MB/s of 16-bit mono PCM)")
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("check", choices=("matrix", "benchmark"))
+    parser.add_argument("check", choices=("matrix", "benchmark", "stream", "perf"))
     parser.add_argument("--frames", type=int, default=4096)
     parser.add_argument("--rate", type=int, default=44100)
     args = parser.parse_args()
@@ -154,6 +225,10 @@ def main():
             for frames in (1, 4095, 4096, 4097)
         ]
         return run_matrix(cases)
+    if args.check == "stream":
+        return run_stream_check(min(args.frames, 8820), args.rate)
+    if args.check == "perf":
+        return run_perf(args.rate)
     # the benchmark feeds the WAV through the environment, so keep it small
     return run_benchmark(min(args.frames, 8820), args.rate)
 

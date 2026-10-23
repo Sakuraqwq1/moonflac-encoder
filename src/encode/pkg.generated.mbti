@@ -14,6 +14,18 @@ pub suberror EncodeError {
 }
 
 // Types and methods
+pub struct StreamEncoder {
+  sample_rate : Int32
+  channels : Int32
+  bits : Int32
+  mut frame_number : Int32
+  buffer : Array[Int64]
+  mut filled : Int32
+}
+pub fn StreamEncoder::finish(Self) -> Bytes
+pub fn StreamEncoder::header(Self) -> Bytes
+pub fn StreamEncoder::new(Int32, Int32, Int32) -> Self raise EncodeError
+pub fn StreamEncoder::write(Self, Array[Int64]) -> Bytes raise EncodeError
 
 // Type aliases
 

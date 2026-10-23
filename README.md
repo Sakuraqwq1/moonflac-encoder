@@ -4,7 +4,7 @@
 
 纯 MoonBit 实现的 **FLAC 编码器**：把 PCM 采样写成原生 `.flac` 文件。
 
-> 状态：**0.2.0，核心功能可用**。STREAMINFO + MD5、定长块帧与 CRC-8/CRC-16、CONSTANT / VERBATIM / FIXED(0–4) / LPC(1–12) 子帧、Rice 分区搜索、立体声去相关均已实现，并通过 libsndfile 与 `Xcsa-ee/moonflac` 两个独立解码器验证。流式编码与压缩率对齐见「路线图」。
+> 状态：**0.4.0，核心功能可用**。STREAMINFO + MD5、定长块帧与 CRC-8/CRC-16、CONSTANT / VERBATIM / FIXED(0–4) / LPC(1–12) 子帧、Rice 分区搜索、立体声去相关、流式/增量编码均已实现；压缩率在 10 组测试信号中 6 组优于 libFLAC 默认设置。
 
 ## 为什么需要它
 
@@ -29,7 +29,7 @@ MoonBit 生态里已经有两个 FLAC **解码器**（`Xcsa-ee/moonflac`、`CXRE
 | 立体声去相关（left/side、right/side、mid/side，按位代价选优） | ✅ |
 | LPC 子帧（Levinson-Durbin + 15-bit 系数量化 + 移位选择） | ✅ |
 | Rice 分区搜索（partition order 1–8） | ✅ |
-| 流式 / 增量编码 | ⬜ 计划中 |
+| 流式 / 增量编码（`StreamEncoder`，STREAMINFO 的总样本数与摘要留空） | ✅ |
 
 ## 用法（库）
 
@@ -60,6 +60,25 @@ moon run cmd/main -- md5 abc
 ```
 
 `gen` 的最后一个参数：`0` 正弦、`1` 双音、`2` 静音、`3` 锯齿、`4` 伪随机。
+
+## 流式 / 增量编码
+
+`StreamEncoder` 接受任意大小的 PCM 切片，返回已经编好的帧：
+
+```moonbit
+let encoder = @moonflac_encoder.stream_encoder(44100, 2, 16)
+let mut out = @moonflac_encoder.stream_header(encoder)   // fLaC + STREAMINFO
+for chunk in incoming_pcm {                              // 任意切片大小
+  out = out + @moonflac_encoder.stream_write(encoder, chunk)
+}
+out = out + @moonflac_encoder.stream_finish(encoder)     // 冲掉最后一个不满的块
+```
+
+流式模式下 STREAMINFO 的总样本数与 PCM 摘要是 0（RFC 9639 定义为"未知"），因为流开始时两者都还不知道；参考实现 `flac` 输出到管道时也是这么做的。解码仍然正常，只是无法用摘要校验解码结果。需要摘要时用一次性的 `encode`。
+
+## 性能
+
+`python tools/verify.py perf` 实测（Windows，native 目标，16-bit 单声道）：约 **60 万样本/秒**，约 13 倍实时。已知瓶颈是立体声选型：每个候选声道编码都写进草稿写入器再量位长，等于把子帧写了近十遍；改成纯计数即可显著提速，已列入路线图。
 
 ## 验证方式
 
@@ -120,7 +139,7 @@ MD5 校验，因此这等于一个独立的 MoonBit 实现认可了本编码器�
 
 ## 路线图
 
-- [ ] 流式 / 增量编码（当前 API 需要整块 PCM 驻留内存）
+- [x] 流式 / 增量编码（`StreamEncoder`）
 - [x] 压缩率对齐 libFLAC：加窗（apodization）后 10 组测试信号中 6 组优于 libFLAC 默认设置，最差一组（单声道正弦）高 3.2%，噪声持平
 - [ ] 自适应块长
 - [ ] 12 / 20 / 32 bit 的参考解码器验证（当前矩阵覆盖 8 / 16 / 24）

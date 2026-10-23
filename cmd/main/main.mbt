@@ -27,6 +27,12 @@ fn main {
     println(hex(@primitives.md5(@utf8.encode(text))))
   } else if command == "version" {
     println(@encoder.version())
+  } else if command == "stream" {
+    if args.length() < 3 {
+      println("usage: moon run cmd/main -- stream <base64 wav | @ENV_NAME>")
+      return
+    }
+    run_stream(resolve_payload(args[2]))
   } else if command == "encode" {
     if args.length() < 3 {
       println("usage: moon run cmd/main -- encode <base64 wav | @ENV_NAME>")
@@ -343,4 +349,65 @@ fn int_arg(text : String) -> Int32 {
   @string.parse_int(text) catch {
     (_ : Error) => 0
   }
+}
+
+///|
+/// Encode a base64 WAV through the incremental API and print the result.
+///
+/// The signal is fed in chunks of 1024 frames, so this exercises exactly the
+/// path a caller uses when the audio arrives from a socket or an audio device.
+fn run_stream(payload : String) -> Unit {
+  let wav = @base64.decode(payload) catch {
+    (_ : @base64.Malformed) => {
+      println("ERROR: payload is not valid base64")
+      return
+    }
+  }
+  let parsed = parse_wav(wav) catch {
+    (_ : WavError) => {
+      println("ERROR: unsupported WAV payload")
+      return
+    }
+  }
+  let (samples, rate, channels, bits) = parsed
+  let encoder = @encoder.stream_encoder(rate, channels, bits) catch {
+    (_ : @encode.EncodeError) => {
+      println("ERROR: bad stream parameters")
+      return
+    }
+  }
+  let out = @buffer.Buffer::Buffer(size_hint=samples.length())
+  let header = @encoder.stream_header(encoder)
+  for index = 0; index < header.length(); index = index + 1 {
+    out.write_byte(header.at(index))
+  }
+  let frames = samples.length() / channels
+  let chunk_frames = 1024
+  let mut offset = 0
+  while offset < frames {
+    let remaining = frames - offset
+    let take = if remaining < chunk_frames { remaining } else { chunk_frames }
+    let chunk = Array::make(take * channels, 0L)
+    for index = 0; index < take * channels; index = index + 1 {
+      chunk[index] = samples[offset * channels + index]
+    }
+    let bytes = @encoder.stream_write(encoder, chunk) catch {
+      (_ : @encode.EncodeError) => {
+        println("ERROR: stream write failed")
+        return
+      }
+    }
+    for index = 0; index < bytes.length(); index = index + 1 {
+      out.write_byte(bytes.at(index))
+    }
+    offset = offset + take
+  }
+  let tail = @encoder.stream_finish(encoder)
+  for index = 0; index < tail.length(); index = index + 1 {
+    out.write_byte(tail.at(index))
+  }
+  let encoded = out.to_bytes()
+  println("rate=\{rate} channels=\{channels} bits=\{bits} frames=\{frames}")
+  println("FLACBEGIN")
+  println(@base64.encode(encoded[:]))
 }

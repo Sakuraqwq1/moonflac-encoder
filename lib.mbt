@@ -18,8 +18,49 @@ pub fn encode(
 }
 
 ///|
+/// An incremental encoder for callers that do not hold the whole signal in
+/// memory.
+pub struct StreamEncoder {
+  inner : @encode.StreamEncoder
+}
+
+///|
+/// Start a streaming encode. Nothing is produced until [`stream_header`].
+pub fn stream_encoder(
+  sample_rate : Int32,
+  channels : Int32,
+  bits_per_sample : Int32,
+) -> StreamEncoder raise @encode.EncodeError {
+  StreamEncoder::{
+    inner: @encode.StreamEncoder::new(sample_rate, channels, bits_per_sample),
+  }
+}
+
+///|
+/// The `fLaC` marker plus a STREAMINFO block whose sample count and PCM digest
+/// are zero ("unknown", as RFC 9639 allows). Emit it before the first frame.
+pub fn stream_header(encoder : StreamEncoder) -> Bytes {
+  encoder.inner.header()
+}
+
+///|
+/// Append interleaved PCM and get back whatever complete frames it produced.
+pub fn stream_write(
+  encoder : StreamEncoder,
+  samples : Array[Int64],
+) -> Bytes raise @encode.EncodeError {
+  encoder.inner.write(samples)
+}
+
+///|
+/// Flush the trailing partial block. Call once at the end of the signal.
+pub fn stream_finish(encoder : StreamEncoder) -> Bytes {
+  encoder.inner.finish()
+}
+
+///|
 /// Version of the `moonflac-encoder` module.
 /// Keep in sync with the `version` field in `moon.mod`.
 pub fn version() -> String {
-  "0.3.0"
+  "0.4.0"
 }

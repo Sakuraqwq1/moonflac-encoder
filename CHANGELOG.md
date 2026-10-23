@@ -4,6 +4,24 @@ All notable changes to `moonflac-encoder` are documented here. The format follow
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-10-22
+
+### Added
+
+- **Streaming / incremental encoding**: `StreamEncoder` (and the `stream_*`
+  facade functions) accept PCM in arbitrary slices and return finished frames.
+  STREAMINFO carries zero for the total sample count and the PCM digest, which
+  RFC 9639 defines as unknown — a stream cannot know either up front, and the
+  reference `flac` tool does the same when writing to a pipe.
+- **`python tools/verify.py stream`**: checks that streaming and one-shot
+  encoding produce byte-identical frames.
+- **`python tools/verify.py perf`**: reports encode throughput. Measured on
+  Windows with the native target: about 600k samples/s (roughly 13x realtime for
+  16 bit mono). The known bottleneck is the stereo assignment search, which
+  writes every candidate to a scratch writer; counting bits analytically instead
+  is the next optimisation.
+- CLI `stream` command, so the incremental path can be exercised end to end.
+
 ## [0.3.0] - 2026-10-22
 
 ### Fixed

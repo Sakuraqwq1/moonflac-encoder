@@ -107,6 +107,10 @@ pub fn encode(
 }
 
 ///|
+/// Block size of every frame but possibly the last.
+const BLOCK_SIZE : Int32 = 4096
+
+///|
 /// The block size used for every frame but possibly the last.
 ///
 /// 4096 is the value the reference encoder defaults to and it keeps the frame
