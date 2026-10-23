@@ -4,6 +4,17 @@ All notable changes to `moonflac-encoder` are documented here. The format follow
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.2] - 2026-10-23
+
+### Added
+
+- **A music-like signal in `tools/verify.py benchmark`**: a chord with a
+  plucked envelope, drum hits and a noise floor. The previous five signals were
+  all tonal or noise, which flattered the encoder; on this one the margin over
+  libFLAC is much smaller (mono 4,725 vs 4,803 bytes, stereo 8,767 vs 9,044) but
+  still favourable. The benchmark now covers 12 cases, 11 of which are at least
+  as small as libFLAC's default output.
+
 ## [0.5.1] - 2026-10-23
 
 ### Fixed

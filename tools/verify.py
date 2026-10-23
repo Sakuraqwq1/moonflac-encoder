@@ -100,6 +100,25 @@ def build_signal(kind, channels, frames, rate):
         base = 0.4 * np.sin(2 * np.pi * np.cumsum(frequency) / rate)
     elif kind == "noise":
         base = 0.3 * np.random.default_rng(7).standard_normal(frames)
+    elif kind == "music":
+        # A chord with a plucked envelope, drum hits and a noise floor: closer
+        # to real material than the pure tones above, and still deterministic.
+        base = (
+            0.22 * np.sin(2 * np.pi * 261.63 * time)
+            + 0.18 * np.sin(2 * np.pi * 329.63 * time + 0.7)
+            + 0.15 * np.sin(2 * np.pi * 392.00 * time + 1.3)
+            + 0.10 * np.sin(2 * np.pi * 523.25 * time + 2.1)
+        )
+        envelope = np.ones(frames)
+        for start in range(0, frames, 1200):
+            span = min(1200, frames - start)
+            envelope[start:start + span] *= np.exp(-np.arange(span) / 260)
+        base = base * envelope
+        for position in (300, 1500, 2700, 3600):
+            if position < frames:
+                span = min(60, frames - position)
+                base[position:position + span] += 0.5 * np.exp(-np.arange(span) / 12)
+        base = base + 0.0015 * np.random.default_rng(11).standard_normal(frames)
     else:
         raise ValueError(f"unknown signal {kind}")
     if channels == 1:
@@ -112,7 +131,7 @@ def run_benchmark(frames, rate):
     import soundfile as sf
 
     print(f"{'signal':10} {'ch':>2} {'raw':>7} {'ours':>7} {'libFLAC':>8} {'vs ref':>8}")
-    for kind in ("sine", "two-tone", "harmonics", "sweep", "noise"):
+    for kind in ("sine", "two-tone", "harmonics", "sweep", "noise", "music"):
         for channels in (1, 2):
             pcm = build_signal(kind, channels, frames, rate)
             wav_path = os.path.join(tempfile.gettempdir(), "moonflac_bench_in.wav")
