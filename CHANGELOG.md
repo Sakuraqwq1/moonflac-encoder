@@ -4,6 +4,14 @@ All notable changes to `moonflac-encoder` are documented here. The format follow
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.3] - 2026-10-22
+
+### Fixed
+
+- The compression summary understated the result: 9 of the 10 benchmark
+  signals are smaller than libFLAC's default output (only the mono sine is 3.2%
+  larger), not 6.
+
 ## [0.4.2] - 2026-10-22
 
 ### Changed

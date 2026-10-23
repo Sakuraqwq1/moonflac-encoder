@@ -4,7 +4,7 @@
 
 纯 MoonBit 实现的 **FLAC 编码器**：把 PCM 采样写成原生 `.flac` 文件。
 
-> 状态：**核心功能可用**。STREAMINFO + MD5、定长块帧与 CRC-8/CRC-16、CONSTANT / VERBATIM / FIXED(0–4) / LPC(1–12) 子帧、Rice 分区搜索、立体声去相关、流式/增量编码均已实现；压缩率在 10 组测试信号中 6 组优于 libFLAC 默认设置。具体版本与变更见 [CHANGELOG](CHANGELOG.md)。
+> 状态：**核心功能可用**。STREAMINFO + MD5、定长块帧与 CRC-8/CRC-16、CONSTANT / VERBATIM / FIXED(0–4) / LPC(1–12) 子帧、Rice 分区搜索、立体声去相关、流式/增量编码均已实现；压缩率在 10 组测试信号中 9 组优于或持平 libFLAC 默认设置。具体版本与变更见 [CHANGELOG](CHANGELOG.md)。
 
 ## 为什么需要它
 
@@ -142,7 +142,7 @@ MD5 校验，因此这等于一个独立的 MoonBit 实现认可了本编码器�
 ## 路线图
 
 - [x] 流式 / 增量编码（`StreamEncoder`）
-- [x] 压缩率对齐 libFLAC：加窗（apodization）后 10 组测试信号中 6 组优于 libFLAC 默认设置，最差一组（单声道正弦）高 3.2%，噪声持平
+- [x] 压缩率对齐 libFLAC：加窗（apodization）后 10 组测试信号中 9 组优于或持平 libFLAC 默认设置，最差一组（单声道正弦）高 3.2%
 - [ ] 自适应块长
 - [ ] 12 / 20 / 32 bit 的参考解码器验证（当前矩阵覆盖 8 / 16 / 24）
 
