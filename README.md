@@ -6,6 +6,14 @@
 
 > 状态：**核心功能可用**。STREAMINFO + MD5、定长块帧与 CRC-8/CRC-16、CONSTANT / VERBATIM / FIXED(0–4) / LPC(1–12) 子帧、Rice 分区搜索、立体声去相关、流式/增量编码均已实现；压缩率在 12 组测试信号中 11 组优于或持平 libFLAC 默认设置。具体版本与变更见 [CHANGELOG](CHANGELOG.md)。
 
+## 安装
+
+```bash
+moon add Sakuraqwq1/moonflac-encoder
+```
+
+发布在 [mooncakes.io](https://mooncakes.io/docs/Sakuraqwq1/moonflac-encoder)。也可以直接克隆仓库，用 `moon run cmd/main -- selftest` 做一次自检（它会合成一段正弦、编码、再打印结果）。
+
 ## 为什么需要它
 
 MoonBit 生态里已经有两个 FLAC **解码器**（`Xcsa-ee/moonflac`、`CXREN/flac`），它们都明确写了「不做编码器」。也就是说：

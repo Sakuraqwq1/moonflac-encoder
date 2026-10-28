@@ -62,5 +62,5 @@ pub fn stream_finish(encoder : StreamEncoder) -> Bytes {
 /// Version of the `moonflac-encoder` module.
 /// Keep in sync with the `version` field in `moon.mod`.
 pub fn version() -> String {
-  "0.5.3"
+  "0.5.4"
 }
