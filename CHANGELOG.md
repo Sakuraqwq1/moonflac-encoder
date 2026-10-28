@@ -4,6 +4,17 @@ All notable changes to `moonflac-encoder` are documented here. The format follow
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.3] - 2026-10-28
+
+### Changed
+
+- **Channel coverage of `tools/verify.py matrix` widened from mono/stereo to
+  1/2/4/8 channels**: the encoder has accepted 1-8 channels since the first
+  release, but the matrix only exercised mono and stereo. It now runs 96 cases
+  (up from 48) across 16/24-bit x 1/2/4/8 channels x sine/silence/noise x
+  1/4095/4096/4097 frames, all bit-exact through the independent decoder.
+  No encoder code changed.
+
 ## [0.5.2] - 2026-10-23
 
 ### Added

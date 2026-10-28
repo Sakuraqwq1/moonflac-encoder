@@ -91,7 +91,7 @@ out = out + @moonflac_encoder.stream_finish(encoder)     // 冲掉最后一个�
 3. 把解码出的 PCM 按 FLAC 规范（小端、`ceil(bits/8)` 字节）重新拼字节流，算 MD5；
 4. 与文件 `STREAMINFO` 里记录的 MD5 比对。
 
-当前矩阵（单/双声道 × 16/24-bit × 正弦/静音/噪声 × 1/4095/4096/4097 帧，共 48 例）全部通过：解码成功、帧数/采样率/声道一致、MD5 一致。典型压缩比（1 秒 440 Hz 正弦）：
+当前矩阵（1/2/4/8 声道 × 16/24-bit × 正弦/静音/噪声 × 1/4095/4096/4097 帧，共 96 例）全部通过：解码成功、帧数/采样率/声道一致、MD5 一致。典型压缩比（1 秒 440 Hz 正弦）：
 
 | 信号（4096 帧，16-bit） | 本编码器 | libFLAC 默认 | 差距 |
 | --- | --- | --- | --- |
@@ -112,7 +112,7 @@ out = out + @moonflac_encoder.stream_finish(encoder)     // 冲掉最后一个�
 仓库自带可复现的验证脚本（需要 Python 的 `numpy` 与 `soundfile`）：
 
 ```bash
-python tools/verify.py matrix      # 48 例跨解码器矩阵，逐样本比对 STREAMINFO 摘要
+python tools/verify.py matrix      # 96 例跨解码器矩阵，逐样本比对 STREAMINFO 摘要
 python tools/verify.py benchmark   # 同一段 PCM 上与 libFLAC 的体积对比
 ```
 

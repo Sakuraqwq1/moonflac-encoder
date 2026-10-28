@@ -240,7 +240,7 @@ def main():
     if args.check == "matrix":
         cases = [
             (args.rate, channels, bits, frames, kind)
-            for channels in (1, 2)
+            for channels in (1, 2, 4, 8)
             for bits in (16, 24)
             for kind in (0, 2, 4)
             for frames in (1, 4095, 4096, 4097)
