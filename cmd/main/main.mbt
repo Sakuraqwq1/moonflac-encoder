@@ -342,6 +342,27 @@ fn run_generate(args : Array[String]) -> Unit {
   )
   println("FLACBEGIN")
   println(@base64.encode(flac[:]))
+  if args.length() > 7 && args[7] == "--pcm" {
+    println("PCMBEGIN")
+    println(@base64.encode(pack_pcm(samples, bits)[:]))
+  }
+}
+
+///|
+/// Pack interleaved samples the way FLAC's STREAMINFO digest covers them:
+/// little endian, `ceil(bits/8)` bytes per sample, two's complement.
+///
+/// Emitting the source alongside the stream lets any decoder be checked for
+/// bit exactness, including bit depths this machine's libsndfile cannot read.
+fn pack_pcm(samples : Array[Int64], bits : Int32) -> Bytes {
+  let width = (bits + 7) / 8
+  let out = @buffer.Buffer::Buffer(size_hint=samples.length() * width)
+  for value in samples {
+    for byte = 0; byte < width; byte = byte + 1 {
+      out.write_byte(((value >> (byte * 8)) & 0xFFL).to_byte())
+    }
+  }
+  out.to_bytes()
 }
 
 ///|

@@ -63,6 +63,9 @@ moon run cmd/main -- encode "$(base64 -w0 input.wav)"
 # 生成测试信号（采样率 声道 位深 帧数 类型）
 moon run cmd/main -- gen 44100 2 16 4096 0
 
+# 同时输出源 PCM（base64），用于和任意解码器做逐位比对
+moon run cmd/main -- gen 44100 2 16 4096 0 --pcm
+
 # MD5 自检，验证摘要实现
 moon run cmd/main -- md5 abc
 ```

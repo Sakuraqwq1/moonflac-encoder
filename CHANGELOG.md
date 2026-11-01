@@ -4,6 +4,17 @@ All notable changes to `moonflac-encoder` are documented here. The format follow
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.5] - 2026-11-01
+
+### Added
+
+- **`gen --pcm`**: the generator now also emits the source PCM as base64, packed
+  the way FLAC's STREAMINFO digest covers it (interleaved, little endian,
+  `ceil(bits/8)` bytes per sample). This is what lets any decoder be compared
+  bit for bit at bit depths libsndfile cannot read, and it makes the digest
+  semantics checkable on their own. Verified at 8, 12, 16, 20, 24 and 32 bits:
+  the digest of the emitted PCM matches the one in STREAMINFO every time.
+
 ## [0.5.4] - 2026-10-28
 
 ### Added
