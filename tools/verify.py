@@ -243,7 +243,7 @@ def main():
             for channels in (1, 2, 4, 8)
             for bits in (16, 24)
             for kind in (0, 2, 4)
-            for frames in (1, 4095, 4096, 4097)
+            for frames in (16, 4095, 4096, 4097)
         ]
         return run_matrix(cases)
     if args.check == "stream":

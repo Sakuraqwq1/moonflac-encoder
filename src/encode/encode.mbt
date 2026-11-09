@@ -18,6 +18,12 @@ pub suberror EncodeError {
   BadSampleRate(Int32)
   /// The sample count is not a multiple of the channel count.
   NotWholeFrames(Int32, Int32)
+  /// A sample does not fit the declared bit depth. Truncating it silently would
+  /// produce a stream whose digest no longer describes the input.
+  SampleOutOfRange(Int32, Int64, Int32)
+  /// FLAC block sizes are at least 16 samples, so a shorter signal cannot be
+  /// represented without inventing samples.
+  TooShort(Int32)
 }
 
 ///|
@@ -50,6 +56,16 @@ pub fn encode(
     raise NotWholeFrames(length, channels)
   }
   let total_frames = length / channels
+  let ceiling = 1L << (bits_per_sample - 1)
+  for index = 0; index < length; index = index + 1 {
+    let value = samples[index]
+    if value < 0L - ceiling || value >= ceiling {
+      raise SampleOutOfRange(index, value, bits_per_sample)
+    }
+  }
+  if total_frames < 16 {
+    raise TooShort(total_frames)
+  }
   let block_size = block_size_for(total_frames)
   let frame_count = (total_frames + block_size - 1) / block_size
   let shortest = if frame_count == 1 {

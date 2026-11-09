@@ -11,6 +11,8 @@ pub suberror EncodeError {
   BadBits(Int32)
   BadSampleRate(Int32)
   NotWholeFrames(Int32, Int32)
+  SampleOutOfRange(Int32, Int64, Int32)
+  TooShort(Int32)
 }
 
 // Types and methods

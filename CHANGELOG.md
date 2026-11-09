@@ -4,6 +4,15 @@ All notable changes to `moonflac-encoder` are documented here. The format follow
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.6] - 2026-11-09
+
+### Fixed
+
+- **4-bit sample range and generator overflow**: Fix PRNG sample generator in `cmd/main` by using Int64 arithmetic to prevent Int32 multiplication overflow (`index * 1103515245L`) that previously produced out-of-range samples.
+- **Sample range validation**: Introduce explicit `SampleOutOfRange` error in `encode()` to guarantee that samples outside $[-2^{b-1}, 2^{b-1}-1]$ are rejected rather than silently truncated into the bitstream.
+- **Minimum block size compliance**: Enforce FLAC RFC 9639 minimum block size $\ge 16$ (`TooShort` error), rejecting illegal sub-16 frame streams.
+- **Official reference decoder verification**: Verified bit-exact roundtrip against official Xiph.Org `flac` 1.4.3 across 4/8/12/16/20/24-bit streams.
+
 ## [0.5.5] - 2026-11-01
 
 ### Added

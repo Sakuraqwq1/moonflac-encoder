@@ -33,7 +33,7 @@ MoonBit 生态里已经有两个 FLAC **解码器**（`Xcsa-ee/moonflac`、`CXRE
 | 帧头 CRC-8、帧尾 CRC-16 | ✅ |
 | CONSTANT / VERBATIM 子帧 | ✅ |
 | FIXED 0–4 阶预测 + Rice 残差（参数搜索） | ✅ |
-| 位深 4–32 bit 路径、1–8 声道（8/16/24 经参考解码器验证；32 bit libsndfile 不支持） | ✅ |
+| 位深 4–32 bit 路径、1–8 声道（4/8/12/16/20/24 经官方 Xiph.Org flac 1.4.3 参考解码器验证） | ✅ |
 | 立体声去相关（left/side、right/side、mid/side，按位代价选优） | ✅ |
 | LPC 子帧（Levinson-Durbin + 15-bit 系数量化 + 移位选择） | ✅ |
 | Rice 分区搜索（partition order 1–8） | ✅ |
@@ -102,7 +102,7 @@ out = out + @moonflac_encoder.stream_finish(encoder)     // 冲掉最后一个�
 3. 把解码出的 PCM 按 FLAC 规范（小端、`ceil(bits/8)` 字节）重新拼字节流，算 MD5；
 4. 与文件 `STREAMINFO` 里记录的 MD5 比对。
 
-当前矩阵（1/2/4/8 声道 × 16/24-bit × 正弦/静音/噪声 × 1/4095/4096/4097 帧，共 96 例）全部通过：解码成功、帧数/采样率/声道一致、MD5 一致。典型压缩比（1 秒 440 Hz 正弦）：
+当前矩阵（1/2/4/8 声道 × 16/24-bit × 正弦/静音/噪声 × 16/4095/4096/4097 帧，共 96 例）全部通过：解码成功、帧数/采样率/声道一致、MD5 一致。典型压缩比（1 秒 440 Hz 正弦）：
 
 | 信号（4096 帧，16-bit） | 本编码器 | libFLAC 默认 | 差距 |
 | --- | --- | --- | --- |

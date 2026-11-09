@@ -92,7 +92,26 @@ test "encode rejects malformed requests" {
   assert_true(rejects(Array::make(8, 0L), 44100, 1, 40))
   assert_true(rejects(Array::make(8, 0L), 0, 1, 16))
   assert_true(rejects(Array::make(9, 0L), 44100, 2, 16))
-  assert_true(!rejects(Array::make(8, 0L), 44100, 2, 16))
+  assert_true(!rejects(Array::make(32, 0L), 44100, 2, 16)) // 16 frames
+}
+
+///|
+test "a sample outside the declared bit depth is rejected" {
+  // 4 bit holds -8..7. An 8 must not be silently truncated to 0.
+  let samples = Array::make(16, 0L)
+  samples[3] = 8L
+  assert_true(rejects(samples, 44100, 1, 4))
+  let negative = Array::make(16, 0L)
+  negative[5] = -9L
+  assert_true(rejects(negative, 44100, 1, 4))
+}
+
+///|
+test "a signal shorter than one FLAC block is rejected" {
+  // FLAC block sizes start at 16 samples; a shorter signal cannot be
+  // represented without inventing audio.
+  assert_true(rejects(Array::make(15, 0L), 44100, 1, 16))
+  assert_true(!rejects(Array::make(16, 0L), 44100, 1, 16))
 }
 
 ///|

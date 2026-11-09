@@ -323,7 +323,15 @@ fn run_generate(args : Array[String]) -> Unit {
         let wrapped = index % 1000
         wrapped.to_double() / 1000.0 * 2.0 - 1.0
       } else {
-        let seed = (index * 1103515245 + channel * 12345 + 12345) % 65536
+        // Int64 arithmetic: `index * 1103515245` overflows Int32 past ~2000
+        // samples, which used to wrap negative and push the value far outside
+        // the requested bit depth.
+        let seed = (
+            index.to_int64() * 1103515245L +
+            channel.to_int64() * 12345L +
+            12345L
+          ) %
+          65536L
         seed.to_double() / 65536.0 * 2.0 - 1.0
       }
       samples[index * channels + channel] = round_half_away(
