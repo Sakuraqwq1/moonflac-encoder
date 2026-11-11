@@ -88,3 +88,23 @@ jobs:
         run: moon build --target native
       - name: Encode a tone end to end
         run: moon run cmd/main -- selftest
+
+  verify-reference:
+    name: verify (flac + libsndfile)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install reference decoders and Python audio libs
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flac libsndfile1 python3-numpy python3-soundfile
+      - name: Install MoonBit
+        run: |
+          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
+          echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
+      - name: Verify 4..32 bit streams against official Xiph.Org flac
+        run: python3 tools/verify.py bitdepths --frames 256
+      - name: Verify streaming frame equivalence
+        run: python3 tools/verify.py stream
+      - name: Verify cross-decoder matrix with libsndfile
+        run: python3 tools/verify.py matrix

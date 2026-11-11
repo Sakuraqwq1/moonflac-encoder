@@ -11,7 +11,7 @@ the same PCM encoded by this project and by libFLAC can be compared decision by
 decision.
 
 Usage:
-    python tools/inspect.py <file.flac> [--max-frames N]
+    python tools/flacdump.py <file.flac> [--max-frames N]
 """
 
 import argparse

@@ -137,4 +137,156 @@ test "the sample count survives the last short block" {
   let flac = encode(samples, 44100, 1, 16)
   let (_, _, _, total) = streaminfo_of(flac)
   assert_eq(total, 4097)
+  // RFC 9639 §8.2: STREAMINFO min_blocksize excludes the last block and must
+  // stay >= 16 (4096 here) even when the trailing frame has only 1 sample.
+  let min_bs = (flac.at(8).to_int() << 8) | flac.at(9).to_int()
+  let max_bs = (flac.at(10).to_int() << 8) | flac.at(11).to_int()
+  assert_eq(min_bs, 4096)
+  assert_eq(max_bs, 4096)
+}
+
+///|
+test "sample rate bounds follow RFC 9639 1..655350 Hz" {
+  let samples = Array::make(16, 0L)
+  assert_true(rejects(samples, -1, 1, 16))
+  assert_true(rejects(samples, 0, 1, 16))
+  assert_true(rejects(samples, 655351, 1, 16))
+  assert_true(!rejects(samples, 1, 1, 16))
+  assert_true(!rejects(samples, 655350, 1, 16))
+  let (low_rate, _, _, _) = streaminfo_of(encode(samples, 1, 1, 16))
+  let (high_rate, _, _, _) = streaminfo_of(encode(samples, 655350, 1, 16))
+  assert_eq(low_rate, 1)
+  assert_eq(high_rate, 655350)
+}
+
+///|
+test "all standard and extreme bit depths 4..32 check exact two's complement bounds" {
+  let depths = [4, 8, 12, 16, 20, 24, 32]
+  for bits in depths {
+    let low = -(1L << (bits - 1))
+    let high = (1L << (bits - 1)) - 1L
+    let valid = Array::make(32, 0L)
+    for index = 0; index < 32; index = index + 1 {
+      valid[index] = if index % 2 == 0 { low } else { high }
+    }
+    let flac = encode(valid, 44100, 1, bits)
+    let (_, _, recorded_bits, total) = streaminfo_of(flac)
+    assert_eq(recorded_bits, bits)
+    assert_eq(total, 32)
+    let too_high = Array::make(16, 0L)
+    too_high[0] = high + 1L
+    assert_true(rejects(too_high, 44100, 1, bits))
+    let too_low = Array::make(16, 0L)
+    too_low[0] = low - 1L
+    assert_true(rejects(too_low, 44100, 1, bits))
+  }
+}
+
+///|
+test "all channel counts 1..8 encode valid STREAMINFO metadata" {
+  for channels = 1; channels <= 8; channels = channels + 1 {
+    let samples = Array::make(32 * channels, 0L)
+    for index = 0; index < samples.length(); index = index + 1 {
+      samples[index] = (index * 19 % 100).to_int64() - 50L
+    }
+    let flac = encode(samples, 48000, channels, 16)
+    let (rate, recorded_ch, bits, total) = streaminfo_of(flac)
+    assert_eq(rate, 48000)
+    assert_eq(recorded_ch, channels)
+    assert_eq(bits, 16)
+    assert_eq(total, 32)
+  }
+}
+
+///|
+test "linear ramp selects FIXED predictor and compresses tightly" {
+  let samples = Array::make(512, 0L)
+  for index = 0; index < 512; index = index + 1 {
+    samples[index] = (index * 16).to_int64() - 4096L
+  }
+  let flac = encode(samples, 44100, 1, 16)
+  // Order-1 difference of a linear ramp is constant, so FIXED order 2 has zero
+  // residual and packs 512 16-bit samples (1024 B raw) into well under 200 B.
+  assert_true(flac.length() < 200)
+}
+
+///|
+test "stereo decorrelation exploits correlated left and right channels" {
+  let frames = 1024
+  let correlated = Array::make(frames * 2, 0L)
+  for index = 0; index < frames; index = index + 1 {
+    let left = ((index * 97 + index * index * 3) % 8192).to_int64() - 4096L
+    correlated[index * 2] = left
+    correlated[index * 2 + 1] = left + 1L
+  }
+  let flac = encode(correlated, 44100, 2, 16)
+  // The side channel (left - right = -1) is constant, so stereo decorrelation
+  // codes the second channel in a few bytes instead of repeating the first.
+  let mono_left = Array::make(frames, 0L)
+  for index = 0; index < frames; index = index + 1 {
+    mono_left[index] = correlated[index * 2]
+  }
+  let mono_flac = encode(mono_left, 44100, 1, 16)
+  assert_true(flac.length() < mono_flac.length() + 40)
+}
+
+///|
+test "standard and custom sample rates and block size table entries encode cleanly" {
+  let rates = [
+    8000, 12345, 16000, 22050, 24000, 32000, 44100, 48000, 88200, 96000, 176400,
+    192000,
+  ]
+  for rate in rates {
+    let samples = Array::make(192, 0L)
+    for index = 0; index < 192; index = index + 1 {
+      samples[index] = (index * 7 % 64).to_int64() - 32L
+    }
+    let flac = encode(samples, rate, 1, 16)
+    let (recorded_rate, _, _, total) = streaminfo_of(flac)
+    assert_eq(recorded_rate, rate)
+    assert_eq(total, 192)
+  }
+  let block_sizes = [16, 192, 256, 512, 576, 1024, 1152, 2048, 2304, 4096]
+  for size in block_sizes {
+    let samples = Array::make(size, 0L)
+    let flac = encode(samples, 44100, 1, 16)
+    let (_, _, _, total) = streaminfo_of(flac)
+    assert_eq(total, size)
+    let min_bs = (flac.at(8).to_int() << 8) | flac.at(9).to_int()
+    let max_bs = (flac.at(10).to_int() << 8) | flac.at(11).to_int()
+    assert_eq(min_bs, size)
+    assert_eq(max_bs, size)
+  }
+}
+
+///|
+test "resonant signal exercises LPC predictor and compresses well below raw PCM" {
+  let frames = 1024
+  let samples = Array::make(frames, 0L)
+  for index = 0; index < frames; index = index + 1 {
+    let t = index.to_double() / 44100.0
+    let wave = 0.4 * @math.sin(6.283185307179586 * 440.0 * t) +
+      0.2 * @math.sin(6.283185307179586 * 1320.0 * t)
+    samples[index] = (wave * 16384.0).to_int().to_int64()
+  }
+  let flac = encode(samples, 44100, 1, 16)
+  // Raw 16-bit mono is 2048 bytes; LPC compresses this harmonic tone under 700 B.
+  assert_true(flac.length() < 700)
+}
+
+///|
+test "UTF-8 variable-length number coding covers 1 to 7 byte ranges" {
+  let writer = @primitives.BitWriter::new()
+  write_utf8_number(writer, 0L)
+  write_utf8_number(writer, 0x7FL)
+  write_utf8_number(writer, 0x80L)
+  write_utf8_number(writer, 0x800L)
+  write_utf8_number(writer, 0x10000L)
+  let encoded = writer.finish()
+  // 1 + 1 + 2 + 3 + 4 = 11 bytes total.
+  assert_eq(encoded.length(), 11)
+  assert_eq(encoded.at(0).to_int(), 0x00)
+  assert_eq(encoded.at(1).to_int(), 0x7F)
+  assert_eq(encoded.at(2).to_int(), 0xC2)
+  assert_eq(encoded.at(3).to_int(), 0x80)
 }

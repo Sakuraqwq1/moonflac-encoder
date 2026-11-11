@@ -20,12 +20,15 @@ import argparse
 import base64
 import hashlib
 import os
+import shutil
+import struct
 import subprocess
 import sys
 import tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MOON = os.environ.get("MOON") or os.path.expanduser("~/.moon/bin/moon")
+FLAC = os.environ.get("FLAC") or shutil.which("flac")
 
 
 def encode_ours(rate, channels, bits, frames, kind):
@@ -230,9 +233,53 @@ def run_perf(rate):
     return 0
 
 
+def run_bitdepths(frames, rate):
+    """Verify 4..32 bit depths via STREAMINFO MD5 and official flac -t (if installed)."""
+    failures = 0
+    depths = (4, 8, 12, 16, 20, 24, 32)
+    print(f"{'rate':>6} {'ch':>3} {'bits':>5} {'frames':>7} {'kind':>5}  {'md5':>4}  {'flac-cli':>8}")
+    for bits in depths:
+        for channels in (1, 2):
+            for kind in (0, 2, 4):
+                proc = subprocess.run(
+                    [MOON, "run", "cmd/main", "--", "gen", str(rate), str(channels),
+                     str(bits), str(frames), str(kind), "--pcm"],
+                    cwd=ROOT, capture_output=True, text=True,
+                )
+                lines = proc.stdout.splitlines()
+                if "FLACBEGIN" not in lines or "PCMBEGIN" not in lines:
+                    failures += 1
+                    print(f"{rate:>6} {channels:>3} {bits:>5} {frames:>7} {kind:>5}  FAIL  encode error")
+                    continue
+                flac = base64.b64decode(lines[lines.index("FLACBEGIN") + 1])
+                pcm = base64.b64decode(lines[lines.index("PCMBEGIN") + 1])
+                min_bs, max_bs = struct.unpack(">HH", flac[8:12])
+                md5_ok = (streaminfo_digest(flac) == hashlib.md5(pcm).hexdigest()
+                          and min_bs >= 16 and max_bs >= 16)
+                cli_status = "skipped"
+                cli_ok = True
+                if FLAC:
+                    with tempfile.NamedTemporaryFile(suffix=".flac", delete=False) as handle:
+                        handle.write(flac)
+                        path = handle.name
+                    try:
+                        res = subprocess.run([FLAC, "-t", "--silent", path],
+                                             capture_output=True, text=True)
+                        cli_ok = res.returncode == 0
+                        cli_status = "ok" if cli_ok else "FAIL"
+                    finally:
+                        os.unlink(path)
+                ok = md5_ok and cli_ok
+                failures += 0 if ok else 1
+                print(f"{rate:>6} {channels:>3} {bits:>5} {frames:>7} {kind:>5}  "
+                      f"{'ok' if md5_ok else 'FAIL':>4}  {cli_status:>8}")
+    print(f"\ncases={len(depths) * 2 * 3} failures={failures}")
+    return 1 if failures else 0
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("check", choices=("matrix", "benchmark", "stream", "perf"))
+    parser.add_argument("check", choices=("matrix", "bitdepths", "benchmark", "stream", "perf"))
     parser.add_argument("--frames", type=int, default=4096)
     parser.add_argument("--rate", type=int, default=44100)
     args = parser.parse_args()
@@ -246,6 +293,8 @@ def main():
             for frames in (16, 4095, 4096, 4097)
         ]
         return run_matrix(cases)
+    if args.check == "bitdepths":
+        return run_bitdepths(args.frames, args.rate)
     if args.check == "stream":
         return run_stream_check(min(args.frames, 8820), args.rate)
     if args.check == "perf":

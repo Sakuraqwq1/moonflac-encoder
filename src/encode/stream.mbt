@@ -34,7 +34,7 @@ pub fn StreamEncoder::new(
   if bits_per_sample < 4 || bits_per_sample > 32 {
     raise BadBits(bits_per_sample)
   }
-  if sample_rate <= 0 {
+  if sample_rate <= 0 || sample_rate > 655350 {
     raise BadSampleRate(sample_rate)
   }
   StreamEncoder::{
@@ -89,6 +89,13 @@ pub fn StreamEncoder::write(
 ) -> Bytes raise EncodeError {
   if samples.length() % self.channels != 0 {
     raise NotWholeFrames(samples.length(), self.channels)
+  }
+  let ceiling = 1L << (self.bits - 1)
+  for index = 0; index < samples.length(); index = index + 1 {
+    let value = samples[index]
+    if value < 0L - ceiling || value >= ceiling {
+      raise SampleOutOfRange(index, value, self.bits)
+    }
   }
   let out = @buffer.Buffer::Buffer(size_hint=1024)
   let frames = samples.length() / self.channels

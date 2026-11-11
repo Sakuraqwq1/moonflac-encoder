@@ -45,6 +45,13 @@ fn main {
       "  selftest   synthesise a tone, encode it, print the FLAC as base64",
     )
     println("  encode     read a base64 WAV, write the FLAC as base64")
+    println(
+      "  stream     read a base64 WAV, encode incrementally, write as base64",
+    )
+    println(
+      "  gen        synthesise test signal (rate channels bits frames kind [--pcm])",
+    )
+    println("  md5        print the RFC 1321 MD5 hex digest of a text argument")
     println("  version    print the module version")
   }
 }
@@ -72,7 +79,7 @@ fn run_selftest() -> Unit {
   for index = 0; index < frames; index = index + 1 {
     let time = index.to_double() / rate.to_double()
     let value = 0.5 * @math.sin(6.283185307179586 * 440.0 * time)
-    samples[index] = round_half_away(value * 32767.0).to_int64()
+    samples[index] = round_half_away(value * 32767.0)
   }
   let flac = @encoder.encode(samples, rate, 1, 16) catch {
     (_ : @encode.EncodeError) => {
@@ -86,12 +93,13 @@ fn run_selftest() -> Unit {
 }
 
 ///|
-/// Round to the nearest integer, away from zero.
-fn round_half_away(value : Double) -> Int32 {
+/// Round to the nearest integer, away from zero, in 64-bit precision so 32-bit
+/// full-scale synthesis cannot overflow Int32.
+fn round_half_away(value : Double) -> Int64 {
   if value >= 0.0 {
-    (value + 0.5).to_int()
+    (value + 0.5).to_int64()
   } else {
-    (value - 0.5).to_int()
+    (value - 0.5).to_int64()
   }
 }
 
@@ -336,7 +344,7 @@ fn run_generate(args : Array[String]) -> Unit {
       }
       samples[index * channels + channel] = round_half_away(
         value * scale.to_double(),
-      ).to_int64()
+      )
     }
   }
   let flac = @encoder.encode(samples, rate, channels, bits) catch {

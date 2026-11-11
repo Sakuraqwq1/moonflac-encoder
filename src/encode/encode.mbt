@@ -45,7 +45,7 @@ pub fn encode(
   if bits_per_sample < 4 || bits_per_sample > 32 {
     raise BadBits(bits_per_sample)
   }
-  if sample_rate <= 0 {
+  if sample_rate <= 0 || sample_rate > 655350 {
     raise BadSampleRate(sample_rate)
   }
   let length = samples.length()
@@ -67,17 +67,6 @@ pub fn encode(
     raise TooShort(total_frames)
   }
   let block_size = block_size_for(total_frames)
-  let frame_count = (total_frames + block_size - 1) / block_size
-  let shortest = if frame_count == 1 {
-    total_frames
-  } else {
-    let tail = total_frames % block_size
-    if tail == 0 {
-      block_size
-    } else {
-      tail
-    }
-  }
   let digest = @primitives.md5(raw_pcm(samples, bits_per_sample))
   let out = @buffer.Buffer::Buffer(size_hint=total_frames * channels)
   out.write_string_utf8("fLaC")
@@ -86,7 +75,9 @@ pub fn encode(
   out.write_byte(0x00)
   out.write_byte(34)
   let info = @primitives.BitWriter::new()
-  info.write_bits(shortest.to_int64(), 16)
+  // RFC 9639 §8.2: minimum block size (excluding the last block) and maximum
+  // block size must both be >= 16; equal values declare a fixed-blocksize stream.
+  info.write_bits(block_size.to_int64(), 16)
   info.write_bits(block_size.to_int64(), 16)
   info.write_bits(0L, 24)
   info.write_bits(0L, 24)

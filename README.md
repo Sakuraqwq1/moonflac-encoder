@@ -33,7 +33,7 @@ MoonBit 生态里已经有两个 FLAC **解码器**（`Xcsa-ee/moonflac`、`CXRE
 | 帧头 CRC-8、帧尾 CRC-16 | ✅ |
 | CONSTANT / VERBATIM 子帧 | ✅ |
 | FIXED 0–4 阶预测 + Rice 残差（参数搜索） | ✅ |
-| 位深 4–32 bit 路径、1–8 声道（4/8/12/16/20/24 经官方 Xiph.Org flac 1.4.3 参考解码器验证） | ✅ |
+| 位深 4–32 bit 路径、1–8 声道（4/8/12/16/20/24/32 经官方 Xiph.Org flac 1.4.3 参考解码器验证） | ✅ |
 | 立体声去相关（left/side、right/side、mid/side，按位代价选优） | ✅ |
 | LPC 子帧（Levinson-Durbin + 15-bit 系数量化 + 移位选择） | ✅ |
 | Rice 分区搜索（partition order 1–8） | ✅ |
@@ -42,9 +42,12 @@ MoonBit 生态里已经有两个 FLAC **解码器**（`Xcsa-ee/moonflac`、`CXRE
 ## 用法（库）
 
 ```moonbit
-// 交织的有符号 PCM，已经缩放到 bits_per_sample 的二进制补码范围
-let samples : Array[Int64] = [0L, 100L, 200L, 300L]
-let flac : Bytes = @moonflac_encoder.encode(samples, 44100, 1, 16)
+// 交织的有符号 PCM，已经缩放到 bits_per_sample 的二进制补码范围（遵循 RFC 9639 至少 16 帧）
+let samples = Array::make(4096, 0L)
+for i = 0; i < 4096; i = i + 1 {
+  samples[i] = ((i * 29) % 2048).to_int64() - 1024L
+}
+let flac : Bytes = @moonflac-encoder.encode(samples, 44100, 1, 16)
 ```
 
 `encode` 的四个参数依次是：交织采样、采样率、声道数、位深。返回值是一个完整的 `.flac` 文件（标记 + STREAMINFO + 若干帧）。
@@ -124,6 +127,8 @@ out = out + @moonflac_encoder.stream_finish(encoder)     // 冲掉最后一个�
 
 ```bash
 python tools/verify.py matrix      # 96 例跨解码器矩阵，逐样本比对 STREAMINFO 摘要
+python tools/verify.py bitdepths   # 4/8/12/16/20/24/32-bit 全位深 MD5 与官方 flac 参考解码器验证
+python tools/verify.py stream      # 流式增量编码与一次性编码的帧级逐字节一致性验证
 python tools/verify.py benchmark   # 同一段 PCM 上与 libFLAC 的体积对比
 ```
 
@@ -156,8 +161,8 @@ MD5 校验，因此这等于一个独立的 MoonBit 实现认可了本编码器�
 
 - [x] 流式 / 增量编码（`StreamEncoder`）
 - [x] 压缩率对齐 libFLAC：加窗（apodization）后 12 组测试信号中 11 组优于或持平 libFLAC 默认设置，最差一组（单声道正弦）高 3.2%
-- [ ] 自适应块长
-- [ ] 12 / 20 / 32 bit 的参考解码器验证（当前矩阵覆盖 8 / 16 / 24）
+- [x] 4 / 8 / 12 / 16 / 20 / 24 / 32 bit 的官方参考解码器验证（`python tools/verify.py bitdepths`）
+- [ ] 自适应可变块长搜索（非定长块帧拆分）
 
 ## 许可证与参考
 

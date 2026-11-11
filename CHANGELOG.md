@@ -4,6 +4,20 @@ All notable changes to `moonflac-encoder` are documented here. The format follow
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.7] - 2026-11-11
+
+### Fixed
+
+- **RFC 9639 §8.2 `STREAMINFO.min_blocksize` invariant on trailing short blocks**: Multi-frame streams with a trailing block shorter than 16 samples (e.g. 4097 frames = 4096 + 1) now record `block_size` (4096) as both `min_blocksize` and `max_blocksize` in `STREAMINFO`, matching the RFC 9639 §8.2 rule ("excluding the last block; MUST be 16 or larger") and the official Xiph.Org `flac` 1.4.3 encoder.
+- **Sample rate upper bound (`<= 655350 Hz`) and `StreamEncoder::write` range checking**: Both `encode()` and `StreamEncoder::new()` now reject sample rates above the RFC 9639 655350 Hz limit, and `StreamEncoder::write()` now enforces `SampleOutOfRange` validation identically to `encode()`.
+- **64-bit rounding in CLI signal generator**: `round_half_away` in `cmd/main` now computes in `Int64` so full-scale 32-bit synthesis cannot overflow `Int32`.
+- **README Quick Start snippet**: Updated the minimal library snippet to generate 4096 frames so it satisfies the RFC 9639 minimum block size (`>= 16`) out of the box.
+
+### Added
+
+- **`python tools/verify.py bitdepths` and CI reference verification**: Automated verification across 4/8/12/16/20/24/32-bit streams against both `STREAMINFO` MD5 and the official Xiph.Org `flac` CLI decoder, integrated into GitHub Actions CI.
+- **Expanded unit and blackbox test suite**: Test suite increased from 17 to 30 tests covering all 4..32 bit depth bounds, 1..8 channels, sample rate boundaries, block size codes, LPC/FIXED/stereo decorrelation subframes, and public facade blackbox tests.
+
 ## [0.5.6] - 2026-11-09
 
 ### Fixed
