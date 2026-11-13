@@ -4,7 +4,7 @@
 
 纯 MoonBit 实现的 **FLAC 编码器**：把 PCM 采样写成原生 `.flac` 文件。
 
-> 状态：**核心功能可用**。STREAMINFO + MD5、定长块帧与 CRC-8/CRC-16、CONSTANT / VERBATIM / FIXED(0–4) / LPC(1–12) 子帧、Rice 分区搜索、立体声去相关、流式/增量编码均已实现；压缩率在 12 组测试信号中 11 组优于或持平 libFLAC 默认设置。具体版本与变更见 [CHANGELOG](CHANGELOG.md)。
+> 状态：**核心功能可用**。STREAMINFO + MD5、定长块帧与 CRC-8/CRC-16、CONSTANT / VERBATIM / FIXED(0–4) / LPC(1–12) 子帧、Rice 分区搜索、立体声去相关、流式/增量编码均已实现；12 组测试信号中有 11 组的编码体积小于或等于 libsndfile 默认 FLAC 输出。具体版本与变更见 [CHANGELOG](CHANGELOG.md)。
 
 ## 安装
 
@@ -29,7 +29,7 @@ MoonBit 生态里已经有两个 FLAC **解码器**（`Xcsa-ee/moonflac`、`CXRE
 | 能力 | 状态 |
 | --- | --- |
 | `fLaC` 标记 + STREAMINFO（含 PCM 的 MD5） | ✅ |
-| 定长块帧（默认 4096），可变块长按尾块处理 | ✅ |
+| 定长块帧（通常为每声道 4096 个采样），末块按剩余采样数编码 | ✅ |
 | 帧头 CRC-8、帧尾 CRC-16 | ✅ |
 | CONSTANT / VERBATIM 子帧 | ✅ |
 | FIXED 0–4 阶预测 + Rice 残差（参数搜索） | ✅ |
@@ -38,6 +38,8 @@ MoonBit 生态里已经有两个 FLAC **解码器**（`Xcsa-ee/moonflac`、`CXRE
 | LPC 子帧（Levinson-Durbin + 15-bit 系数量化 + 移位选择） | ✅ |
 | Rice 分区搜索（partition order 1–8） | ✅ |
 | 流式 / 增量编码（`StreamEncoder`，STREAMINFO 的总样本数与摘要留空） | ✅ |
+
+定长块流的末块可短于常规块长，保留原始采样数。一次性接口要求输入至少有 16 个采样帧。
 
 ## 用法（库）
 
@@ -77,12 +79,12 @@ moon run cmd/main -- md5 abc
 
 ## 流式 / 增量编码
 
-`StreamEncoder` 接受任意大小的 PCM 切片，返回已经编好的帧：
+`StreamEncoder` 接受按完整声道组切分的交织 PCM，返回已完成的帧：
 
 ```moonbit
 let encoder = @moonflac_encoder.stream_encoder(44100, 2, 16)
 let mut out = @moonflac_encoder.stream_header(encoder)   // fLaC + STREAMINFO
-for chunk in incoming_pcm {                              // 任意切片大小
+for chunk in incoming_pcm {                              // 每个切片的样本数须为声道数的整数倍
   out = out + @moonflac_encoder.stream_write(encoder, chunk)
 }
 out = out + @moonflac_encoder.stream_finish(encoder)     // 冲掉最后一个不满的块
@@ -105,9 +107,9 @@ out = out + @moonflac_encoder.stream_finish(encoder)     // 冲掉最后一个�
 3. 把解码出的 PCM 按 FLAC 规范（小端、`ceil(bits/8)` 字节）重新拼字节流，算 MD5；
 4. 与文件 `STREAMINFO` 里记录的 MD5 比对。
 
-当前矩阵（1/2/4/8 声道 × 16/24-bit × 正弦/静音/噪声 × 16/4095/4096/4097 帧，共 96 例）全部通过：解码成功、帧数/采样率/声道一致、MD5 一致。典型压缩比（1 秒 440 Hz 正弦）：
+当前矩阵（1/2/4/8 声道 × 16/24-bit × 正弦/静音/噪声 × 16/4095/4096/4097 帧，共 96 例）均可由 libsndfile 解码，解码 PCM 的 MD5 与 STREAMINFO 一致。下表列出相同 PCM 经本编码器与 libsndfile 的 FLAC 写入器编码后的文件体积。
 
-| 信号（4096 帧，16-bit） | 本编码器 | libFLAC 默认 | 差距 |
+| 信号（4096 帧，16-bit） | 本编码器 | libsndfile 默认 FLAC | 差距 |
 | --- | --- | --- | --- |
 | 单声道正弦 | 1,326 B | 1,285 B | +3.2% |
 | 立体声正弦 | 2,549 B | 2,607 B | −2.2% |
@@ -127,9 +129,9 @@ out = out + @moonflac_encoder.stream_finish(encoder)     // 冲掉最后一个�
 
 ```bash
 python tools/verify.py matrix      # 96 例跨解码器矩阵，逐样本比对 STREAMINFO 摘要
-python tools/verify.py bitdepths   # 4/8/12/16/20/24/32-bit 全位深 MD5 与官方 flac 参考解码器验证
+python tools/verify.py bitdepths   # 4/8/12/16/20/24/32-bit 所列位深的源 PCM 摘要与官方 flac 参考解码器验证
 python tools/verify.py stream      # 流式增量编码与一次性编码的帧级逐字节一致性验证
-python tools/verify.py benchmark   # 同一段 PCM 上与 libFLAC 的体积对比
+python tools/verify.py benchmark   # 同一段 PCM 上与 libsndfile 默认 FLAC 输出的体积对比
 ```
 
 
@@ -157,16 +159,15 @@ MD5 校验，因此这等于一个独立的 MoonBit 实现认可了本编码器�
 - **代价用 Int64 累加**：32 位精度会让 24-bit 噪声的位数估算溢出，从而误选编码器写不下的参数——这一点在开发中被矩阵测试抓出过。
 - **MD5 自实现**：核心库没有 MD5，而 STREAMINFO 的校验依赖它；实现后用 RFC 1321 标准向量验证。
 
-## 路线图
+## 已交付功能与验证
 
 - [x] 流式 / 增量编码（`StreamEncoder`）
-- [x] 压缩率对齐 libFLAC：加窗（apodization）后 12 组测试信号中 11 组优于或持平 libFLAC 默认设置，最差一组（单声道正弦）高 3.2%
+- [x] 压缩体积对比（`python tools/verify.py benchmark`）：12 组测试信号中 11 组体积小于或等于 libsndfile 默认 FLAC 输出，最差一组（单声道正弦）高 3.2%
 - [x] 4 / 8 / 12 / 16 / 20 / 24 / 32 bit 的官方参考解码器验证（`python tools/verify.py bitdepths`）
-- [ ] 自适应可变块长搜索（非定长块帧拆分）
 
 ## 许可证与参考
 
 Apache-2.0，原创实现。
 
 - 规范：[RFC 9639](https://www.rfc-editor.org/rfc/rfc9639.txt)（FLAC，2024-12）、[xiph.org/flac 格式文档](https://xiph.org/flac/format.html)
-- 未复制任何第三方源码；STREAMINFO 的 MD5 语义按 RFC 9639 §8.4 实现（交织、小端、每样本 `ceil(bits/8)` 字节）
+- 未复制任何第三方源码；STREAMINFO 的 MD5 语义按 RFC 9639 §8.2 实现（交织、小端、每样本 `ceil(bits/8)` 字节）
