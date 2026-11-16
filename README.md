@@ -79,15 +79,22 @@ moon run cmd/main -- md5 abc
 
 ## 流式 / 增量编码
 
-`StreamEncoder` 接受按完整声道组切分的交织 PCM，返回已完成的帧：
+`StreamEncoder` 接受按完整声道组切分的交织 PCM。先输出头部，再逐批传入 PCM 并收集完整的音频帧，最后调用 `stream_finish` 输出剩余采样。
+
+将下面的示例保存为 `stream_test.mbt`，并在 `moon.pkg` 中添加测试导入 `import { "Sakuraqwq1/moonflac-encoder" } for "test"`，然后运行 `moon test`。
 
 ```moonbit
-let encoder = @moonflac_encoder.stream_encoder(44100, 2, 16)
-let mut out = @moonflac_encoder.stream_header(encoder)   // fLaC + STREAMINFO
-for chunk in incoming_pcm {                              // 每个切片的样本数须为声道数的整数倍
-  out = out + @moonflac_encoder.stream_write(encoder, chunk)
+test "encode interleaved PCM in chunks" {
+  // 双声道输入，每个切片的样本数须为 2 的倍数。
+  let incoming_pcm = [Array::make(8192, 0L), [0L, 1L]]
+  let encoder = @moonflac-encoder.stream_encoder(44100, 2, 16)
+  let mut out = @moonflac-encoder.stream_header(encoder)
+  for chunk in incoming_pcm {
+    out = out + @moonflac-encoder.stream_write(encoder, chunk)
+  }
+  out = out + @moonflac-encoder.stream_finish(encoder)
+  assert_true(out.length() > 42)
 }
-out = out + @moonflac_encoder.stream_finish(encoder)     // 冲掉最后一个不满的块
 ```
 
 流式模式下 STREAMINFO 的总样本数与 PCM 摘要是 0（RFC 9639 定义为"未知"），因为流开始时两者都还不知道；参考实现 `flac` 输出到管道时也是这么做的。解码仍然正常，只是无法用摘要校验解码结果。需要摘要时用一次性的 `encode`。
@@ -100,14 +107,10 @@ out = out + @moonflac_encoder.stream_finish(encoder)     // 冲掉最后一个�
 
 ## 验证方式
 
-编码器的正确性不是靠"能跑"判断的，而是拿**独立解码器**逐样本比对：
+- **Xiph.Org 参考解码器**。使用 `flac 1.4.3` 复测了 4、8、12、16、20、24、32 bit。运行 `python tools/verify.py bitdepths` 可比对源 PCM 与 STREAMINFO 的 MD5，并通过 `flac -t` 检查解码。将 `flac` 加入 PATH，或用环境变量 `FLAC` 指向可执行文件。输出中的 `flac-cli` 列为 `ok` 时表示该项已执行并通过。
+- **libsndfile 1.2.2**。实测 8、16、24 bit 可解码。仓库的 `python tools/verify.py matrix` 覆盖 1/2/4/8 声道 × 16/24 bit × 正弦/静音/噪声 × 16/4095/4096/4097 帧，共 96 例。脚本通过 Python `soundfile` 解码，把 PCM 按 FLAC 规范重新打包，并将摘要与 STREAMINFO 的 MD5 比对。
 
-1. 用 MoonBit 编码器产出 `.flac`；
-2. 交给 Python `soundfile`（libsndfile，完全独立于 MoonBit 生态）解码；
-3. 把解码出的 PCM 按 FLAC 规范（小端、`ceil(bits/8)` 字节）重新拼字节流，算 MD5；
-4. 与文件 `STREAMINFO` 里记录的 MD5 比对。
-
-当前矩阵（1/2/4/8 声道 × 16/24-bit × 正弦/静音/噪声 × 16/4095/4096/4097 帧，共 96 例）均可由 libsndfile 解码，解码 PCM 的 MD5 与 STREAMINFO 一致。下表列出相同 PCM 经本编码器与 libsndfile 的 FLAC 写入器编码后的文件体积。
+下表列出相同 PCM 经本编码器与 libsndfile 的 FLAC 写入器编码后的文件体积。
 
 | 信号（4096 帧，16-bit） | 本编码器 | libsndfile 默认 FLAC | 差距 |
 | --- | --- | --- | --- |
@@ -128,7 +131,7 @@ out = out + @moonflac_encoder.stream_finish(encoder)     // 冲掉最后一个�
 仓库自带可复现的验证脚本（需要 Python 的 `numpy` 与 `soundfile`）：
 
 ```bash
-python tools/verify.py matrix      # 96 例跨解码器矩阵，逐样本比对 STREAMINFO 摘要
+python tools/verify.py matrix      # 96 例 libsndfile 解码矩阵，比对 PCM 与 STREAMINFO 摘要
 python tools/verify.py bitdepths   # 4/8/12/16/20/24/32-bit 所列位深的源 PCM 摘要与官方 flac 参考解码器验证
 python tools/verify.py stream      # 流式增量编码与一次性编码的帧级逐字节一致性验证
 python tools/verify.py benchmark   # 同一段 PCM 上与 libsndfile 默认 FLAC 输出的体积对比
