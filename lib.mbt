@@ -53,14 +53,27 @@ pub fn stream_write(
 }
 
 ///|
-/// Flush the trailing partial block. Call once at the end of the signal.
-pub fn stream_finish(encoder : StreamEncoder) -> Bytes {
+/// Flush the trailing block. An empty stream or a total under 16 samples
+/// per channel is rejected. After success, repeated calls return empty bytes.
+pub fn stream_finish(
+  encoder : StreamEncoder,
+) -> Bytes raise @encode.EncodeError {
   encoder.inner.finish()
+}
+
+///|
+/// Final STREAMINFO with the PCM sample count and digest. Obtain this after
+/// finishing and replace the 42-byte provisional header, or prepend it when
+/// assembling already collected frames.
+pub fn stream_final_header(
+  encoder : StreamEncoder,
+) -> Bytes raise @encode.EncodeError {
+  encoder.inner.final_header()
 }
 
 ///|
 /// Version of the `moonflac-encoder` module.
 /// Keep in sync with the `version` field in `moon.mod`.
 pub fn version() -> String {
-  "0.5.7"
+  "0.6.0"
 }

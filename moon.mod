@@ -3,7 +3,7 @@
 
 name = "Sakuraqwq1/moonflac-encoder"
 
-version = "0.5.7"
+version = "0.6.0"
 
 readme = "README.md"
 

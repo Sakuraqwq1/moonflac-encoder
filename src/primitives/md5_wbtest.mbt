@@ -4,7 +4,7 @@
 /// Build a byte string from numeric values, so expected digests can be written
 /// out without escape sequences.
 fn bytes_of(values : Array[Int32]) -> Bytes {
-  let out = @buffer.Buffer::Buffer(size_hint=values.length())
+  let out = @buffer.Buffer::Buffer()
   for value in values {
     out.write_byte(value.to_byte())
   }

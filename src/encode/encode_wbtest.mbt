@@ -72,7 +72,7 @@ test "STREAMINFO carries the MD5 of the unencoded PCM" {
     samples[index] = (index % 64).to_int64() - 32L
   }
   let flac = encode(samples, 48000, 1, 16)
-  let raw = @buffer.Buffer::Buffer(size_hint=512)
+  let raw = @buffer.Buffer::Buffer()
   for index = 0; index < samples.length(); index = index + 1 {
     let value = samples[index]
     raw.write_byte((value & 0xFFL).to_byte())
@@ -289,4 +289,33 @@ test "UTF-8 variable-length number coding covers 1 to 7 byte ranges" {
   assert_eq(encoded.at(1).to_int(), 0x7F)
   assert_eq(encoded.at(2).to_int(), 0xC2)
   assert_eq(encoded.at(3).to_int(), 0x80)
+}
+
+///|
+test "FIXED predictor selection prices each order with its best Rice partition" {
+  let noisy_start : Array[Int64] = [
+    54L, -153L, 67L, -137L, -74L, -113L, -32L, -191L, 94L, 170L, 166L, -170L, -185L,
+    -161L, -195L, 166L, 134L, 20L, -63L, 43L, 124L, -26L, -34L, -58L, 186L, -130L,
+    -175L, -60L, 90L, 17L, -86L, 63L,
+  ]
+  let noisy_end : Array[Int64] = [
+    792L, 1193L, 352L, -1154L, -335L, 470L, -132L, 527L, 1171L, -869L, 131L, -490L,
+    -1815L, 1117L, 207L, -387L, 1377L, -888L, -1756L, 730L, 696L, -556L, -749L, 1901L,
+    1088L, 1522L, 861L, -826L, -1437L, 122L, 866L, 551L,
+  ]
+  let pcm = Array::makei(128, i => {
+    if i < 32 {
+      ((i % 3 - 1) * 20).to_int64()
+    } else if i < 64 {
+      noisy_start[i - 32]
+    } else if i < 96 {
+      10738L + (i - 64).to_int64() * 160L
+    } else {
+      noisy_end[i - 96]
+    }
+  })
+  let plan = Array::make(35, 0L)
+  assert_eq(plan_plane_subframe(pcm, 16, plan), 1246L)
+  assert_eq(plan[33], 10L)
+  assert_eq(plan[0], 4L)
 }

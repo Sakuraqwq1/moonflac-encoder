@@ -21,9 +21,14 @@ pub suberror EncodeError {
   /// A sample does not fit the declared bit depth. Truncating it silently would
   /// produce a stream whose digest no longer describes the input.
   SampleOutOfRange(Int32, Int64, Int32)
-  /// FLAC block sizes are at least 16 samples, so a shorter signal cannot be
-  /// represented without inventing samples.
+  /// The complete input is below the encoder minimum of 16 samples per channel.
   TooShort(Int32)
+  /// Writing more samples after successful finalization is invalid.
+  StreamFinished
+  /// A finalized header is available after successful finalization.
+  StreamNotFinished
+  /// The stream would exceed the 36-bit total-sample field.
+  TooLong
 }
 
 ///|
@@ -68,29 +73,17 @@ pub fn encode(
   }
   let block_size = block_size_for(total_frames)
   let digest = @primitives.md5(raw_pcm(samples, bits_per_sample))
-  let out = @buffer.Buffer::Buffer(size_hint=total_frames * channels)
-  out.write_string_utf8("fLaC")
-  out.write_byte(0x80)
-  out.write_byte(0x00)
-  out.write_byte(0x00)
-  out.write_byte(34)
-  let info = @primitives.BitWriter::new()
-  // RFC 9639 §8.2: minimum block size (excluding the last block) and maximum
-  // block size must both be >= 16; equal values declare a fixed-blocksize stream.
-  info.write_bits(block_size.to_int64(), 16)
-  info.write_bits(block_size.to_int64(), 16)
-  info.write_bits(0L, 24)
-  info.write_bits(0L, 24)
-  info.write_bits(sample_rate.to_int64(), 20)
-  info.write_bits((channels - 1).to_int64(), 3)
-  info.write_bits((bits_per_sample - 1).to_int64(), 5)
-  info.write_bits(total_frames.to_int64(), 36)
-  let info_bytes = info.finish()
-  for index = 0; index < info_bytes.length(); index = index + 1 {
-    out.write_byte(info_bytes.at(index))
-  }
-  for index = 0; index < digest.length(); index = index + 1 {
-    out.write_byte(digest.at(index))
+  let out = @buffer.Buffer::Buffer()
+  let header = flac_header(
+    sample_rate,
+    channels,
+    bits_per_sample,
+    block_size,
+    total_frames.to_int64(),
+    digest,
+  )
+  for byte in header {
+    out.write_byte(byte)
   }
   let channel_code = channels - 1
   let mut frame = 0
@@ -109,6 +102,42 @@ pub fn encode(
     }
     offset = offset + count
     frame = frame + 1
+  }
+  out.to_bytes()
+}
+
+///|
+fn flac_header(
+  sample_rate : Int32,
+  channels : Int32,
+  bits_per_sample : Int32,
+  block_size : Int32,
+  total_frames : Int64,
+  digest : Bytes,
+) -> Bytes {
+  let out = @buffer.Buffer::Buffer()
+  out.write_string_utf8("fLaC")
+  out.write_byte(0x80)
+  out.write_byte(0x00)
+  out.write_byte(0x00)
+  out.write_byte(34)
+  let info = @primitives.BitWriter::new()
+  // RFC 9639 §8.2: minimum block size (excluding the last block) and maximum
+  // block size must both be >= 16; equal values declare a fixed-blocksize stream.
+  info.write_bits(block_size.to_int64(), 16)
+  info.write_bits(block_size.to_int64(), 16)
+  info.write_bits(0L, 24)
+  info.write_bits(0L, 24)
+  info.write_bits(sample_rate.to_int64(), 20)
+  info.write_bits((channels - 1).to_int64(), 3)
+  info.write_bits((bits_per_sample - 1).to_int64(), 5)
+  info.write_bits(total_frames, 36)
+  let info_bytes = info.finish()
+  for index = 0; index < info_bytes.length(); index = index + 1 {
+    out.write_byte(info_bytes.at(index))
+  }
+  for index = 0; index < digest.length(); index = index + 1 {
+    out.write_byte(digest.at(index))
   }
   out.to_bytes()
 }
@@ -135,7 +164,7 @@ fn block_size_for(total_frames : Int32) -> Int32 {
 /// interleaved, signed, little endian, `ceil(bits/8)` bytes per value.
 fn raw_pcm(samples : Array[Int64], bits : Int32) -> Bytes {
   let width = (bits + 7) / 8
-  let out = @buffer.Buffer::Buffer(size_hint=samples.length() * width)
+  let out = @buffer.Buffer::Buffer()
   for index = 0; index < samples.length(); index = index + 1 {
     let value = samples[index]
     for byte = 0; byte < width; byte = byte + 1 {
@@ -370,7 +399,7 @@ fn build_frame(
   }
   let body = frame.finish()
   let checksum = @primitives.crc16(body)
-  let out = @buffer.Buffer::Buffer(size_hint=body.length() + 2)
+  let out = @buffer.Buffer::Buffer()
   for index = 0; index < body.length(); index = index + 1 {
     out.write_byte(body.at(index))
   }
@@ -444,10 +473,8 @@ fn write_plane_subframe(
 /// is the exact bit cost. Stereo assignment selection calls this for every
 /// candidate, so it must not touch a writer: that is what made encoding slow.
 ///
-/// The FIXED orders and the LPC orders are first ranked with a single
-/// partition Rice estimate, then the surviving FIXED and LPC candidates are
-/// costed again with the full partition search: the partition gain differs
-/// between candidates, so a proxy comparison alone can pick the wrong family.
+/// FIXED searches all legal orders and partitions. The LPC estimate shortlists
+/// predictor orders before the selected candidate is priced with all partitions.
 /// The returned cost and the stored partition order always describe exactly
 /// what `write_plane_subframe` emits.
 fn plan_plane_subframe(
@@ -470,44 +497,22 @@ fn plan_plane_subframe(
     plan[34] = 0L
     return (8 + bits).to_int64()
   }
-  let mut fixed_order = -1
-  let mut fixed_estimate = 0L
-  for order = 0; order <= 4; order = order + 1 {
-    if order < count {
-      let residual = fixed_residual(plane, order)
-      let (_parameter, rice_cost) = best_parameter_cost(
-        residual,
-        0,
-        residual.length(),
-      )
-      let cost = (8 + order * bits + 6 + 4).to_int64() + rice_cost
-      if fixed_order < 0 || cost < fixed_estimate {
-        fixed_estimate = cost
-        fixed_order = order
-      }
+  let mut best_code = 1
+  let mut best_bits = (8 + count * bits).to_int64()
+  for order = 0; order <= 4 && order < count; order = order + 1 {
+    let residual = fixed_residual(plane, order)
+    let partition = best_partition(residual, count, order)
+    let cost = (8 + order * bits + 6).to_int64() +
+      partition_cost(residual, count, order, partition)
+    if cost < best_bits {
+      best_bits = cost
+      best_code = 8 + order
+      plan[0] = partition.to_int64()
     }
   }
   let choice = Array::make(4, 0L)
   let coefficients = Array::make(33, 0L)
   let lpc_estimate = lpc_search(plane, bits, choice, coefficients)
-  let verbatim_bits = (8 + count * bits).to_int64()
-  let mut best_code = 1
-  let mut best_bits = verbatim_bits
-  if fixed_order >= 0 {
-    let residual = fixed_residual(plane, fixed_order)
-    let partition = best_partition(residual, count, fixed_order)
-    let cost = (8 + fixed_order * bits + 6).to_int64() +
-      partition_cost(residual, count, fixed_order, partition)
-    if cost < best_bits {
-      best_bits = cost
-      best_code = 8 + fixed_order
-      plan[0] = partition.to_int64()
-    }
-  }
-  // Only take LPC when it is clearly better than storing the samples. On
-  // noise-like blocks LPC wins by a fraction of a percent, which is not worth
-  // the extra decoder work (and is the regime where the predictor is least
-  // trustworthy), so require a five percent margin.
   if lpc_estimate >= 0L {
     let order = choice[1].to_int()
     let shift = choice[2].to_int()
@@ -515,7 +520,7 @@ fn plan_plane_subframe(
     let partition = best_partition(residual, count, order)
     let cost = (8 + order * bits + 4 + 5 + order * 15 + 6).to_int64() +
       partition_cost(residual, count, order, partition)
-    if cost < best_bits && cost * 100L < verbatim_bits * 95L {
+    if cost < best_bits {
       best_bits = cost
       best_code = choice[0].to_int()
       plan[0] = partition.to_int64()

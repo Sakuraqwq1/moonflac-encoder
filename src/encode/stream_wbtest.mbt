@@ -6,7 +6,7 @@ fn stream_all(samples : Array[Int64], channels : Int32, chunk : Int32) -> Bytes 
   let encoder = StreamEncoder::new(44100, channels, 16) catch {
     (_ : EncodeError) => return Bytes::make(0, 0)
   }
-  let out = @buffer.Buffer::Buffer(size_hint=samples.length())
+  let out = @buffer.Buffer::Buffer()
   let header = encoder.header()
   for index = 0; index < header.length(); index = index + 1 {
     out.write_byte(header.at(index))
@@ -28,7 +28,9 @@ fn stream_all(samples : Array[Int64], channels : Int32, chunk : Int32) -> Bytes 
     }
     offset = offset + take
   }
-  let tail = encoder.finish()
+  let tail = encoder.finish() catch {
+    (_ : EncodeError) => return Bytes::make(0, 0)
+  }
   for index = 0; index < tail.length(); index = index + 1 {
     out.write_byte(tail.at(index))
   }
@@ -77,15 +79,20 @@ test "chunk boundaries do not change the output" {
 
 ///|
 test "the stream splits into whole blocks plus a partial tail" {
-  let samples = ramp(4097, 2)
-  let encoded = stream_all(samples, 2, 512)
-  // Two frames: 4096 samples and 1 sample. The second one uses the 16 bit
-  // block size code, which is what the header of that frame has to say.
-  assert_true(encoded.length() > 4096)
+  let encoder = StreamEncoder::new(44100, 2, 16)
+  let pcm = ramp(4096, 2)
+  let first = encoder.write(pcm)
+  assert_true(first.length() > 0)
+  assert_eq(encoder.write([-123L, 321L]).length(), 0)
+  let tail = encoder.finish()
+  assert_true(tail.length() > 0)
+  pcm.push(-123L)
+  pcm.push(321L)
+  assert_eq(encoder.final_header() + first + tail, encode(pcm, 44100, 2, 16))
 }
 
 ///|
-test "streamed frames are byte-for-byte identical to one-shot frames" {
+test "finalized incremental encoding equals the full one-shot file" {
   for bits in [8, 16, 24] {
     let samples = Array::make(4200 * 2, 0L)
     for index = 0; index < samples.length(); index = index + 1 {
@@ -93,11 +100,7 @@ test "streamed frames are byte-for-byte identical to one-shot frames" {
     }
     let oneshot = encode(samples, 44100, 2, bits)
     let encoder = StreamEncoder::new(44100, 2, bits)
-    let streamed = @buffer.Buffer::Buffer(size_hint=oneshot.length())
-    let header = encoder.header()
-    for index = 0; index < header.length(); index = index + 1 {
-      streamed.write_byte(header.at(index))
-    }
+    let streamed = @buffer.Buffer::Buffer()
     let body = encoder.write(samples)
     for index = 0; index < body.length(); index = index + 1 {
       streamed.write_byte(body.at(index))
@@ -106,12 +109,7 @@ test "streamed frames are byte-for-byte identical to one-shot frames" {
     for index = 0; index < tail.length(); index = index + 1 {
       streamed.write_byte(tail.at(index))
     }
-    let streamed_bytes = streamed.to_bytes()
-    assert_eq(oneshot.length(), streamed_bytes.length())
-    // Bytes 42..end are the encoded frames; they must match identically.
-    for index = 42; index < oneshot.length(); index = index + 1 {
-      assert_eq(oneshot.at(index), streamed_bytes.at(index))
-    }
+    assert_eq(oneshot, encoder.final_header() + streamed.to_bytes())
   }
 }
 
@@ -142,7 +140,40 @@ test "StreamEncoder validates parameters and sample ranges" {
     }
   }
   assert_true(range_rejected)
-  // Empty finish produces 0 bytes and is idempotent.
+}
+
+///|
+test "stream rejects empty and too-short inputs and locks a successful finish" {
+  let encoder = StreamEncoder::new(44100, 1, 16)
+  let empty_rejected = try {
+    ignore(encoder.finish())
+    false
+  } catch {
+    Empty => true
+    _ => false
+  }
+  assert_true(empty_rejected)
+  ignore(encoder.write(Array::make(15, -123L)))
+  let short_rejected = try {
+    ignore(encoder.finish())
+    false
+  } catch {
+    TooShort(count) => count == 15
+    _ => false
+  }
+  assert_true(short_rejected)
+  ignore(encoder.write([321L]))
+  let tail = encoder.finish()
+  let pcm = Array::make(16, -123L)
+  pcm[15] = 321L
+  assert_eq(encoder.final_header() + tail, encode(pcm, 44100, 1, 16))
   assert_eq(encoder.finish().length(), 0)
-  assert_eq(encoder.finish().length(), 0)
+  let closed = try {
+    ignore(encoder.write([0L]))
+    false
+  } catch {
+    StreamFinished => true
+    _ => false
+  }
+  assert_true(closed)
 }

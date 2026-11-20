@@ -1,6 +1,10 @@
 // Generated using `moon info`, DON'T EDIT IT
 package "Sakuraqwq1/moonflac-encoder/src/encode"
 
+import {
+  "Sakuraqwq1/moonflac-encoder/src/primitives",
+}
+
 // Values
 pub fn encode(Array[Int64], Int32, Int32, Int32) -> Bytes raise EncodeError
 
@@ -13,6 +17,9 @@ pub suberror EncodeError {
   NotWholeFrames(Int32, Int32)
   SampleOutOfRange(Int32, Int64, Int32)
   TooShort(Int32)
+  StreamFinished
+  StreamNotFinished
+  TooLong
 }
 
 // Types and methods
@@ -23,8 +30,12 @@ pub struct StreamEncoder {
   mut frame_number : Int32
   buffer : Array[Int64]
   mut filled : Int32
+  mut total_frames : Int64
+  mut finished : Bool
+  digest : @primitives.Md5
 }
-pub fn StreamEncoder::finish(Self) -> Bytes
+pub fn StreamEncoder::final_header(Self) -> Bytes raise EncodeError
+pub fn StreamEncoder::finish(Self) -> Bytes raise EncodeError
 pub fn StreamEncoder::header(Self) -> Bytes
 pub fn StreamEncoder::new(Int32, Int32, Int32) -> Self raise EncodeError
 pub fn StreamEncoder::write(Self, Array[Int64]) -> Bytes raise EncodeError

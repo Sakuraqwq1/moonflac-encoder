@@ -372,7 +372,7 @@ fn run_generate(args : Array[String]) -> Unit {
 /// bit exactness, including bit depths this machine's libsndfile cannot read.
 fn pack_pcm(samples : Array[Int64], bits : Int32) -> Bytes {
   let width = (bits + 7) / 8
-  let out = @buffer.Buffer::Buffer(size_hint=samples.length() * width)
+  let out = @buffer.Buffer::Buffer()
   for value in samples {
     for byte = 0; byte < width; byte = byte + 1 {
       out.write_byte(((value >> (byte * 8)) & 0xFFL).to_byte())
@@ -413,11 +413,7 @@ fn run_stream(payload : String) -> Unit {
       return
     }
   }
-  let out = @buffer.Buffer::Buffer(size_hint=samples.length())
-  let header = @encoder.stream_header(encoder)
-  for index = 0; index < header.length(); index = index + 1 {
-    out.write_byte(header.at(index))
-  }
+  let out = @buffer.Buffer::Buffer()
   let frames = samples.length() / channels
   let chunk_frames = 1024
   let mut offset = 0
@@ -439,11 +435,30 @@ fn run_stream(payload : String) -> Unit {
     }
     offset = offset + take
   }
-  let tail = @encoder.stream_finish(encoder)
+  let tail = @encoder.stream_finish(encoder) catch {
+    @encode.Empty => {
+      println("ERROR: no PCM samples")
+      return
+    }
+    @encode.TooShort(count) => {
+      println("ERROR: need at least 16 samples per channel (got \{count})")
+      return
+    }
+    _ => {
+      println("ERROR: stream finalization failed")
+      return
+    }
+  }
   for index = 0; index < tail.length(); index = index + 1 {
     out.write_byte(tail.at(index))
   }
-  let encoded = out.to_bytes()
+  let header = @encoder.stream_final_header(encoder) catch {
+    _ => {
+      println("ERROR: final STREAMINFO is unavailable")
+      return
+    }
+  }
+  let encoded = header + out.to_bytes()
   println("rate=\{rate} channels=\{channels} bits=\{bits} frames=\{frames}")
   println("FLACBEGIN")
   println(@base64.encode(encoded[:]))

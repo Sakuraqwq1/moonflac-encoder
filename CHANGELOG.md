@@ -4,6 +4,13 @@ All notable changes to `moonflac-encoder` are documented here. The format follow
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-11-20
+
+- 使用兼容新旧 MoonBit 工具链的 Buffer 构造方式。
+- 流式收尾会报告空流或超短流错误，成功后拒绝写入。原有非抛错调用者需处理 `EncodeError`。
+- 增量计算 PCM 摘要并提供最终 STREAMINFO。回填头部后与一次性编码整文件逐字节一致。
+- 对所有可用 FIXED 阶数比较完整的 Rice 分区成本，并按完整候选代价比较 LPC 和 VERBATIM。
+
 ## [0.5.7] - 2026-11-11
 
 ### Fixed

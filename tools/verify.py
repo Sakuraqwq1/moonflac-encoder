@@ -162,13 +162,7 @@ def run_benchmark(frames, rate):
 
 
 def run_stream_check(frames, rate):
-    """Streaming and one-shot encoding must produce identical frames.
-
-    The header differs on purpose: a stream cannot know the total sample count
-    or the PCM digest up front, so both are zero. Everything after the header is
-    the audio, and if those bytes match then the two files necessarily decode to
-    the same samples.
-    """
+    """Finalized streaming and one-shot encoding must match byte for byte."""
     import numpy as np
     import soundfile as sf
 
@@ -192,14 +186,13 @@ def run_stream_check(frames, rate):
     oneshot = run("encode")
     streamed = run("stream")
     header = 42  # fLaC marker + 4 byte block header + 34 byte STREAMINFO
-    same_frames = oneshot[header:] == streamed[header:]
+    identical = oneshot == streamed
     print(f"one-shot    : {len(oneshot):6d} bytes total, {len(oneshot) - header} bytes of frames")
     print(f"streamed    : {len(streamed):6d} bytes total, {len(streamed) - header} bytes of frames")
     print("STREAMINFO total samples (one-shot / streamed):", oneshot[8 + 13:8 + 18].hex(),
           "/", streamed[8 + 13:8 + 18].hex())
-    print("frames identical" if same_frames else "FRAMES DIFFER")
-    print("PASS" if same_frames else "FAIL")
-    return 0 if same_frames else 1
+    print("PASS: entire file identical" if identical else "FAIL: files differ")
+    return 0 if identical else 1
 
 
 def run_perf(rate):

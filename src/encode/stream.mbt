@@ -18,6 +18,9 @@ pub struct StreamEncoder {
   mut frame_number : Int32
   buffer : Array[Int64]
   mut filled : Int32
+  mut total_frames : Int64
+  mut finished : Bool
+  digest : @primitives.Md5
 }
 
 ///|
@@ -44,6 +47,9 @@ pub fn StreamEncoder::new(
     frame_number: 0,
     buffer: Array::make(BLOCK_SIZE * channels, 0L),
     filled: 0,
+    total_frames: 0L,
+    finished: false,
+    digest: @primitives.Md5::new(),
   }
 }
 
@@ -51,30 +57,33 @@ pub fn StreamEncoder::new(
 /// The `fLaC` marker and the STREAMINFO block, with the sample count and PCM
 /// digest left unknown. Emit this once, before the first frame.
 pub fn StreamEncoder::header(self : StreamEncoder) -> Bytes {
-  let out = @buffer.Buffer::Buffer(size_hint=64)
-  out.write_string_utf8("fLaC")
-  out.write_byte(0x80)
-  out.write_byte(0x00)
-  out.write_byte(0x00)
-  out.write_byte(34)
-  let info = @primitives.BitWriter::new()
-  info.write_bits(BLOCK_SIZE.to_int64(), 16)
-  info.write_bits(BLOCK_SIZE.to_int64(), 16)
-  info.write_bits(0L, 24)
-  info.write_bits(0L, 24)
-  info.write_bits(self.sample_rate.to_int64(), 20)
-  info.write_bits((self.channels - 1).to_int64(), 3)
-  info.write_bits((self.bits - 1).to_int64(), 5)
-  info.write_bits(0L, 36)
-  let body = info.finish()
-  for index = 0; index < body.length(); index = index + 1 {
-    out.write_byte(body.at(index))
+  flac_header(
+    self.sample_rate,
+    self.channels,
+    self.bits,
+    BLOCK_SIZE,
+    0L,
+    Bytes::make(16, 0),
+  )
+}
+
+///|
+/// Replace the provisional header with this one after a successful finish.
+pub fn StreamEncoder::final_header(
+  self : StreamEncoder,
+) -> Bytes raise EncodeError {
+  if !self.finished {
+    raise StreamNotFinished
   }
-  // Unknown digest: sixteen zero bytes.
-  for _index = 0; _index < 16; _index = _index + 1 {
-    out.write_byte(0x00)
-  }
-  out.to_bytes()
+  let block_size = self.total_frames.min(BLOCK_SIZE.to_int64()).to_int()
+  flac_header(
+    self.sample_rate,
+    self.channels,
+    self.bits,
+    block_size,
+    self.total_frames,
+    self.digest.digest(),
+  )
 }
 
 ///|
@@ -87,6 +96,9 @@ pub fn StreamEncoder::write(
   self : StreamEncoder,
   samples : Array[Int64],
 ) -> Bytes raise EncodeError {
+  if self.finished {
+    raise StreamFinished
+  }
   if samples.length() % self.channels != 0 {
     raise NotWholeFrames(samples.length(), self.channels)
   }
@@ -97,8 +109,14 @@ pub fn StreamEncoder::write(
       raise SampleOutOfRange(index, value, self.bits)
     }
   }
-  let out = @buffer.Buffer::Buffer(size_hint=1024)
+  let out = @buffer.Buffer::Buffer()
   let frames = samples.length() / self.channels
+  let total_frames = self.total_frames + frames.to_int64()
+  if total_frames >= 1L << 36 {
+    raise TooLong
+  }
+  self.digest.update(raw_pcm(samples, self.bits))
+  self.total_frames = total_frames
   let mut index = 0
   while index < frames {
     let room = BLOCK_SIZE - self.filled
@@ -139,8 +157,17 @@ pub fn StreamEncoder::write(
 ///|
 /// Flush the final partial block. Call once, after the last
 /// [`StreamEncoder::write`]; further calls return nothing.
-pub fn StreamEncoder::finish(self : StreamEncoder) -> Bytes {
-  let out = @buffer.Buffer::Buffer(size_hint=1024)
+pub fn StreamEncoder::finish(self : StreamEncoder) -> Bytes raise EncodeError {
+  if self.finished {
+    return b""
+  }
+  if self.total_frames == 0L {
+    raise Empty
+  }
+  if self.total_frames < 16L {
+    raise TooShort(self.total_frames.to_int())
+  }
+  self.finished = true
   if self.filled > 0 {
     let bytes = build_frame(
       self.buffer,
@@ -152,11 +179,8 @@ pub fn StreamEncoder::finish(self : StreamEncoder) -> Bytes {
       self.sample_rate,
       self.bits,
     )
-    for byte = 0; byte < bytes.length(); byte = byte + 1 {
-      out.write_byte(bytes.at(byte))
-    }
-    self.frame_number = self.frame_number + 1
     self.filled = 0
+    return bytes
   }
-  out.to_bytes()
+  b""
 }

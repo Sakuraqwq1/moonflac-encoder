@@ -16,13 +16,7 @@ moon add Sakuraqwq1/moonflac-encoder
 
 ## 为什么需要它
 
-MoonBit 生态里已经有两个 FLAC **解码器**（`Xcsa-ee/moonflac`、`CXREN/flac`），它们都明确写了「不做编码器」。也就是说：
-
-- 解码有，编码没有；
-- 用 MoonBit 写的工具、游戏、编辑器，能**读** FLAC，但没法**写出** FLAC；
-- 想把素材压缩成无损体积、想在 CI 里生成 `.flac` 测试数据，只能退回 C 工具链。
-
-本项目的目标就是补上"写出"这一半：纯 MoonBit、零 FFI、可在 wasm-gc 与 native 上跑，输出能被参考解码器正常读取。
+本项目提供纯 MoonBit、零 FFI 的原生 FLAC 写入接口，可在 wasm-gc 和 native 上使用。输出由 Xiph 参考解码器与社区解码器 `Xcsa-ee/moonflac` 验证。生态中的 `CXREN/flac` 提供解码，`0717lee/moonflac` 也提供独立的编码实现。
 
 ## 当前能力
 
@@ -39,7 +33,7 @@ MoonBit 生态里已经有两个 FLAC **解码器**（`Xcsa-ee/moonflac`、`CXRE
 | Rice 分区搜索（partition order 1–8） | ✅ |
 | 流式 / 增量编码（`StreamEncoder`，STREAMINFO 的总样本数与摘要留空） | ✅ |
 
-定长块流的末块可短于常规块长，保留原始采样数。一次性接口要求输入至少有 16 个采样帧。
+定长块流的末块可短于常规块长，保留原始采样数。一次性和流式接口都要求输入总计至少有 16 个采样帧。
 
 ## 用法（库）
 
@@ -97,13 +91,15 @@ test "encode interleaved PCM in chunks" {
 }
 ```
 
-流式模式下 STREAMINFO 的总样本数与 PCM 摘要是 0（RFC 9639 定义为"未知"），因为流开始时两者都还不知道；参考实现 `flac` 输出到管道时也是这么做的。解码仍然正常，只是无法用摘要校验解码结果。需要摘要时用一次性的 `encode`。
+实时写入管道时，`stream_header` 将 STREAMINFO 的总采样数和 PCM 摘要设为 RFC 9639 定义的未知值。写入可回填的文件时，成功调用 `stream_finish` 后，用 `stream_final_header` 替换开头 42 字节，即可获得和一次性编码逐字节一致的文件。若已收集音频帧，也可以直接把最终头部拼接在它们之前。
+
+`stream_finish` 会拒绝空流和总长度不足 16 帧的流，可以继续写入达到下限后再收尾。成功收尾后继续写入会返回 `StreamFinished`。v0.6.0 起，原来在非抛错函数中调用 `stream_finish` 的使用方需要处理 `EncodeError`。
 
 ## 性能
 
-`python tools/verify.py perf` 实测（Windows，native 目标，16-bit 单声道整数锯齿波，避开信号合成的开销）：**约 80 万样本/秒**（约 18 倍实时，测量波动 ±20%）。
+`python tools/verify.py perf` 实测（Windows，native 目标，16-bit 单声道整数锯齿波）：**约 66 万样本/秒**（约为 44.1 kHz 实时的 15 倍）。
 
-每个声道平面每帧只规划一次，写出直接复用规划结果（含子帧类型、LPC 系数与分区阶）；代价计算、选型与写出共用同一个 Rice 参数搜索函数，因此既没有重复搜索，选型代价与实际写出的位数也严格一致。
+FIXED 会比较各合法阶数的完整 Rice 分区代价。LPC 先根据自相关估计筛选阶数并量化系数，再把候选的实际位数与其他模式比较。写出时复用选定的子帧类型、系数与分区阶。
 
 ## 验证方式
 
@@ -121,7 +117,7 @@ test "encode interleaved PCM in chunks" {
 | 单声道谐波堆叠 | 1,468 B | 1,723 B | −14.8% |
 | 单声道扫频 | 2,583 B | 3,451 B | −25.2% |
 | 单声道噪声 | 7,948 B | 7,992 B | −0.6% |
-| 单声道音乐型（和弦 + 包络 + 瞬态 + 底噪） | 4,725 B | 4,803 B | −1.6% |
+| 单声道音乐型（和弦 + 包络 + 瞬态 + 底噪） | 4,720 B | 4,803 B | −1.7% |
 | 立体声音乐型 | 8,767 B | 9,044 B | −3.1% |
 
 （复现：`python tools/verify.py benchmark`）
@@ -133,7 +129,7 @@ test "encode interleaved PCM in chunks" {
 ```bash
 python tools/verify.py matrix      # 96 例 libsndfile 解码矩阵，比对 PCM 与 STREAMINFO 摘要
 python tools/verify.py bitdepths   # 4/8/12/16/20/24/32-bit 所列位深的源 PCM 摘要与官方 flac 参考解码器验证
-python tools/verify.py stream      # 流式增量编码与一次性编码的帧级逐字节一致性验证
+python tools/verify.py stream      # 验证回填最终头部后与一次性编码整文件逐字节一致
 python tools/verify.py benchmark   # 同一段 PCM 上与 libsndfile 默认 FLAC 输出的体积对比
 ```
 

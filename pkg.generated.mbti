@@ -10,7 +10,9 @@ pub fn encode(Array[Int64], Int32, Int32, Int32) -> Bytes raise @encode.EncodeEr
 
 pub fn stream_encoder(Int32, Int32, Int32) -> StreamEncoder raise @encode.EncodeError
 
-pub fn stream_finish(StreamEncoder) -> Bytes
+pub fn stream_final_header(StreamEncoder) -> Bytes raise @encode.EncodeError
+
+pub fn stream_finish(StreamEncoder) -> Bytes raise @encode.EncodeError
 
 pub fn stream_header(StreamEncoder) -> Bytes
 

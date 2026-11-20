@@ -30,6 +30,18 @@ pub fn BitWriter::write_bytes(Self, Bytes) -> Unit
 pub fn BitWriter::write_signed(Self, Int64, Int32) -> Unit
 pub fn BitWriter::write_unary(Self, Int32) -> Unit
 
+pub struct Md5 {
+  mut a : Int64
+  mut b : Int64
+  mut c : Int64
+  mut d : Int64
+  mut length : Int64
+  words : Array[Int64]
+}
+pub fn Md5::digest(Self) -> Bytes
+pub fn Md5::new() -> Self
+pub fn Md5::update(Self, Bytes) -> Unit
+
 // Type aliases
 
 // Traits
